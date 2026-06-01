@@ -132,31 +132,23 @@ Vector2 velocity = {toScalar(0.0f), toScalar(0.0f)};
 renderer.drawSprite(sprite, static_cast<int>(x), static_cast<int>(y), Color::White);
 ```
 
-## Memory Constraints
+## Subsystem Skills
 
-Generate code respecting ESP32 limits:
-- Max entities per scene: 32 (configurable via `MAX_ENTITIES`)
-- Physics contacts pool: 128 (fixed, no heap allocation)
-- Spatial grid cell size: 32px default
-- Avoid runtime allocations in `update()` and `draw()`
+For subsystem-specific code generation, use the specialized skills:
 
-## Modular Compilation
+| Subsystem | Skill | Use When |
+|-----------|-------|----------|
+| Camera | `pixelroot32-camera2d` | Camera logic, effects, parallax |
+| Audio | `pixelroot32-audio` | Sound, music, voice pooling |
+| Rendering | `pixelroot32-sprite-renderer` | Sprites, tilemaps, dirty regions |
+| Physics | `pixelroot32-physics` | Collision, actors, spatial grid |
+| UI | `pixelroot32-ui-system` | Layouts, widgets, touch integration |
+| Scenes | `pixelroot32-scene-manager` | Scene lifecycle, transitions |
+| Input | `pixelroot32-touch-input` | Touch events, state machine |
+| Particles | `pixelroot32-particles` | Emitters, presets |
+| Entities | `pixelroot32-entity-actor` | Actor types, lifecycle |
 
-Wrap subsystem code with conditional compilation:
-
-```cpp
-#if PIXELROOT32_ENABLE_AUDIO
-class AudioManager {
-    pixelroot32::audio::AudioEngine* audio;
-};
-#endif
-
-#if PIXELROOT32_ENABLE_PHYSICS
-class PhysicsObject : public pixelroot32::core::PhysicsActor {
-    // Physics-enabled actor
-};
-#endif
-```
+For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`.
 
 ## Logging Integration
 

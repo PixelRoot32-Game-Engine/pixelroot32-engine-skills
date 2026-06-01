@@ -52,7 +52,11 @@ test/
 ├── test_game_loop/           # Game loop tests
 └── mocks/                    # Mock implementations
     ├── MockAudioBackend.h
+    ├── MockAudioScheduler.h
+    ├── MockDisplay.h
+    ├── MockEntity.h
     ├── MockDrawSurface.h
+    ├── MockScene.h
     └── MockRenderer.h
 ```
 
@@ -212,3 +216,19 @@ void test_esp32_audio_dac(void) {
 - Include path: `../../test_config.h` from unit tests
 - Use mocks from `../../mocks/` directory
 - Embedded tests marked with `test_ignore` in platformio.ini
+
+## Subsystem-Specific Testing
+
+For testing patterns specific to each subsystem, refer to the specialized skills:
+
+| Subsystem | Skill | Test Suites |
+|-----------|-------|-------------|
+| Camera | `pixelroot32-camera2d` | `test_camera2d`, `test_camera_effects` |
+| Audio | `pixelroot32-audio` | `test_audio*`, `test_apu_core`, `test_music_player` |
+| Rendering | `pixelroot32-sprite-renderer` | `test_graphics`, `test_dirty_grid`, `test_tile_animation` |
+| Physics | `pixelroot32-physics` | `test_collision_*`, `test_physics_*`, `test_sensor_actor` |
+| UI | `pixelroot32-ui-system` | `test_ui*`, `test_uimanager` |
+| Scenes | `pixelroot32-scene-manager` | `test_scene*`, `test_entity`, `test_actor` |
+| Input | `pixelroot32-touch-input` | `test_TouchEvent*`, `test_touch_calibration` |
+| Particles | `pixelroot32-particles` | `test_particle_emitter` |
+| Entities | `pixelroot32-entity-actor` | `test_actor*`, `test_entity`, `test_static_actor` |

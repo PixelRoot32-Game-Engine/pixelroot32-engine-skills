@@ -190,3 +190,16 @@ void* allocated = arena.alloc(sizeof(MyEntity));
 - Use pooling for high-rotation objects (bullets, particles)
 - Pass `std::string_view` not `std::string` to avoid copies
 - Use `snprintf` with stack buffers for formatting
+
+## Subsystem-Specific Constraints
+
+For memory patterns specific to each subsystem, refer to the specialized skills:
+
+| Subsystem | Skill | Key Constraints |
+|-----------|-------|-----------------|
+| Camera | `pixelroot32-camera2d` | 4 effect slots, zero-heap, Xorshift32 |
+| Audio | `pixelroot32-audio` | 8-voice pool, Q15 no-FPU, SPSC queue |
+| Rendering | `pixelroot32-sprite-renderer` | Dirty grid, static cache, palette |
+| Physics | `pixelroot32-physics` | 128 contacts, Fixed16, spatial grid |
+| UI | `pixelroot32-ui-system` | Widget pool, hit test cache |
+| Particles | `pixelroot32-particles` | Emitter pool, preset configs |
