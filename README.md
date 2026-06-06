@@ -14,10 +14,16 @@ When you ask an AI to "create a new level" or "add a touch UI" for PixelRoot32, 
 
 ## 🚀 How to Use These Skills
 
-If you are a game developer using an AI-assisted workflow:
-1. **Contextualize your Agent:** Point your AI assistant to this repository folder (`pixelroot32-skills/engine`).
-2. **Prompt freely:** Ask your AI to build features. For example: *"Create a new Scene with a pause menu using `pixelroot32-scene-manager` and `pixelroot32-ui-system`"*.
-3. **Automatic Compliance:** The AI will read the requested skills, apply the engine's strict `Agent Constraints`, and generate production-ready code that complies with the ESP32 limits.
+We use the official [skills.sh](https://skills.sh/) CLI to distribute these skills into your local agent configuration.
+
+1. **Install a specific skill via npx:** 
+   Run the following command for the subsystem you need. For example, to install the audio skill:
+   ```bash
+   npx skills add PixelRoot32-Game-Engine/pixelroot32-engine-skills/pixelroot32-audio
+   ```
+2. **Contextualize your Agent:** The CLI will automatically copy the skill to your agent's config folder (e.g. `.cursor/rules` or `.gemini/config/skills`).
+3. **Prompt freely:** Ask your AI to build features. For example: *"Create a new Scene with a pause menu using `pixelroot32-scene-manager` and `pixelroot32-ui-system`"*.
+4. **Automatic Compliance:** The AI will read the requested skills, apply the engine's strict `Agent Constraints`, and generate production-ready code that complies with the ESP32 limits.
 
 ## 📚 Skill Catalog
 
