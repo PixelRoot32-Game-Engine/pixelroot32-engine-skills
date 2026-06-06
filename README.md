@@ -1,160 +1,51 @@
-# pixelroot32-skills
+# PixelRoot32 Agent Skills
 
-Skills catalog for working with the **PixelRoot32 Game Engine** ecosystem.
+Welcome to the **PixelRoot32 Skills Catalog**. This repository contains a collection of specialized "Skills" designed to supercharge AI Agents (like Gemini, Cursor, or Copilot) when developing video games for the **PixelRoot32 Game Engine**.
 
-## Description
+## 🤖 What is this?
 
-Collection of specialized skills for game development with PixelRoot32, a game engine designed specifically for ESP32 and other embedded platforms. Each skill provides guides, code patterns, and best practices for different engine subsystems.
+This is not just standard documentation. These are **Agent Skills**—strict, context-rich rulebooks formatted specifically for LLMs. 
 
-## Project Structure
+When you ask an AI to "create a new level" or "add a touch UI" for PixelRoot32, the AI reads the corresponding skill from this repository. This guarantees that the AI:
+- Writes C++17 code highly optimized for the ESP32.
+- Adheres strictly to the **Zero-Allocation** architecture (no `new`, no `std::vector`).
+- Respects hardware limits (memory, spatial grids, fixed arrays).
+- Avoids hallucinations by following exact syntax for drawing, physics, and audio.
 
-```
-pixelroot32-skills/
-├── engine/                        # Engine skills
-│   ├── pixelroot32-audio/
-│   ├── pixelroot32-camera2d/
-│   ├── pixelroot32-cpp-code-generation/
-│   ├── pixelroot32-docs/
-│   ├── pixelroot32-entity-actor/
-│   ├── pixelroot32-memory-optimization/
-│   ├── pixelroot32-particles/
-│   ├── pixelroot32-physics/
-│   ├── pixelroot32-scene-manager/
-│   ├── pixelroot32-sprite-renderer/
-│   ├── pixelroot32-testing/
-│   ├── pixelroot32-touch-input/
-│   └── pixelroot32-ui-system/
-└── tool-suite/                   # (Reserved for tools)
-```
+## 🚀 How to Use These Skills
 
-## Available Skills
+If you are a game developer using an AI-assisted workflow:
+1. **Contextualize your Agent:** Point your AI assistant to this repository folder (`pixelroot32-skills/engine`).
+2. **Prompt freely:** Ask your AI to build features. For example: *"Create a new Scene with a pause menu using `pixelroot32-scene-manager` and `pixelroot32-ui-system`"*.
+3. **Automatic Compliance:** The AI will read the requested skills, apply the engine's strict `Agent Constraints`, and generate production-ready code that complies with the ESP32 limits.
 
-### Engine
+## 📚 Skill Catalog
 
-| Skill | Description | Platform |
-|-------|-------------|----------|
-| `pixelroot32-sprite-renderer` | Rendering system: 1bpp/2bpp/4bpp sprites, MultiSprite layering, tilemaps, dirty regions, palette management (single/dual/multi-slot), text rendering | Cross-platform |
-| `pixelroot32-testing` | Unit and integration tests with Unity framework, coverage analysis, mocks | Cross-platform |
-| `pixelroot32-memory-optimization` | Memory optimization: modular compilation, object pooling, zero-allocation patterns for ESP32 | ESP32 |
-| `pixelroot32-ui-system` | Touch UI: layouts (Anchor, Grid, Horizontal, Vertical), widgets (Button, Checkbox, Label, Panel, Slider), hit testing, UIManager | Cross-platform |
-| `pixelroot32-audio` | NES-style 8-voice audio: 5 wave types, ADSR+LFO+sweep envelopes, Q15 no-FPU path, SPSC queue, multi-track sequencer | Cross-platform |
-| `pixelroot32-physics` | Flat Solver 6-step pipeline, broad/narrow phase collision, CCD, one-way platforms, spatial grid, tile collision builder | Cross-platform |
-| `pixelroot32-entity-actor` | Entity/Actor/PhysicsActor hierarchy, collision layers/masks, 4 body types (Static, Kinematic, Rigid, Sensor), Fixed16 math | Cross-platform |
-| `pixelroot32-camera2d` | Camera2D viewport management, follow-target scrolling, bounds clamping, camera effects (shake, punch, offset) | Cross-platform |
-| `pixelroot32-particles` | Particle system: configurable emitters, built-in presets (Fire, Explosion, Smoke, Sparks, Dust), velocity/gravity/friction physics, color interpolation | Cross-platform |
-| `pixelroot32-scene-manager` | Scene lifecycle, stack-based navigation, Fade/Iris transitions, entity arena allocation, CameraEffects integration | Cross-platform |
-| `pixelroot32-touch-input` | Touch input pipeline: adapter pattern (XPT2046, GT911), state machine gesture detection, pull-based event dispatching, calibration | Cross-platform |
-| `pixelroot32-cpp-code-generation` | C++17 code generation following engine conventions, naming patterns, and architectural practices | Cross-platform |
-| `pixelroot32-docs` | Doxygen documentation guidelines for engine APIs | Cross-platform |
+The suite is divided into specific engine subsystems. Your AI will dynamically load these as needed:
 
-## Usage
+| Skill | What the AI learns... |
+|-------|------------------------|
+| `pixelroot32-sprite-renderer` | How to draw 1bpp/2bpp/4bpp sprites, tilemaps, and use the Dirty Grid rendering without dropping frames. |
+| `pixelroot32-physics` | How to set up rigid bodies, kinematic controllers, and use the Flat Solver without relying on floating-point math (FPU). |
+| `pixelroot32-ui-system` | How to build HUDs, touch menus, and grids using pre-allocated elements to prevent dangling pointers. |
+| `pixelroot32-audio` | How to synthesize NES-style 8-voice audio, ADSR envelopes, and queue sounds safely across threads. |
+| `pixelroot32-memory-optimization`| **CRITICAL:** The strict rules of embedded C++ (No exceptions, no dynamic heap, pool allocation). |
+| `pixelroot32-scene-manager` | How to handle game states, scene transitions (Fade/Iris), and Arena allocation. |
+| `pixelroot32-particles` | How to spawn explosion or dust effects respecting the hard limit of 50 particles per emitter. |
+| `pixelroot32-touch-input` | How to map raw touch events to gestures and prevent UI events from bleeding into the game logic. |
+| `pixelroot32-camera2d` | How to manipulate the viewport, apply screen shake, and bounds clamping. |
+| `pixelroot32-entity-actor` | How to structure the game objects using the Godot-inspired node hierarchy. |
+| `pixelroot32-testing` | How to generate Unity framework unit tests using Mocks for isolated validation. |
+| `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, and `-fno-exceptions` enforcement. |
+| `pixelroot32-docs` | Doxygen documentation standards for the PixelRoot32 ecosystem. |
 
-Each skill contains a `SKILL.md` file with:
+## 🛡️ Engine Constraints Enforced by these Skills
 
-- **Overview**: General subsystem description
-- **Key APIs**: Header references, namespaces, and code examples
-- **Composition Patterns**: Integration examples across subsystems
-- **ESP32 Constraints**: Platform-specific limitations and gotchas
-- **Common Patterns**: Ready-to-use code snippets
+By using these skills, your AI is strictly instructed to follow the core pillars of PixelRoot32:
+- **Zero-Heap Fragmentation:** Agents are forbidden from using `malloc`, `new`, or `std::shared_ptr` in the game loop.
+- **Data-Driven Compilation:** Agents will correctly wrap subsystems in `#if PIXELROOT32_ENABLE_*` macros to save Flash and RAM.
+- **Fixed-Point Math:** Agents will use `toScalar()` instead of `float` to guarantee determinism on non-FPU microcontrollers like the ESP32-C3.
+- **Event Consumption:** Strict enforcement of `event.consume()` to prevent touch-input bleed.
 
-## Engine Key Features
-
-### Graphics System
-
-- Sprite formats: 1bpp (monochrome), 2bpp (4-color), 4bpp (16-color)
-- MultiSprite layering (compose multiple 1bpp layers)
-- 3 tilemap types with runtime activation mask
-- Dirty region optimization (8×8 cell grid)
-- Static tilemap cache for non-dynamic layers
-- Palette system: single, dual (background vs sprites), multi-slot (8 slots)
-- Step-based sprite animation
-- Text rendering with custom fonts
-
-### Camera
-
-- 2D camera with smooth follow-target
-- Per-axis bounds clamping
-- Camera effects: shake (Xorshift32), punch (directional impulse), offset
-- 4 effect slots with round-robin allocation
-- Parallax scrolling support
-
-### Physics
-
-- Flat Solver 6-step pipeline: Detect → Solve Velocity → Integrate → Solve Penetration → Callbacks
-- Actor types: Static, Kinematic, Rigid, Sensor
-- Continuous Collision Detection (CCD) for fast bodies
-- Spatial grid with separate static/dynamic layers
-- One-way platforms
-- Tile collision builder with merge optimization
-
-### Audio
-
-- 8-voice dynamic pooling
-- 5 wave types: Pulse, Triangle, Noise, Sine, Saw
-- Per-voice ADSR envelopes, LFO modulation, frequency sweep
-- 10 instrument presets
-- Multi-track music sequencer with MusicPlayer
-- Lock-free SPSC command queue
-- Q15 fixed-point path for no-FPU cores
-
-### UI
-
-- Entity-based UI elements integrated with scene graph
-- Layouts: Anchor, Grid, Horizontal, Vertical
-- Touch widgets: Button, Checkbox, Slider, Panel, Label
-- UIManager for touch event routing and hover/pressed/captured state
-- Fixed-position HUD support (ignores camera scroll)
-
-### Particles
-
-- Entity-based emitters with fixed-size pool (50 particles max)
-- Built-in presets: Fire, Explosion, Smoke, Sparks, Dust
-- Configurable: speed, gravity, friction, angle-based emission, color interpolation
-- Zero heap allocation
-
-### Scenes
-
-- Stack-based scene navigation (push/pop)
-- Transition effects: Fade, Iris
-- Entity arena allocation (placement new, zero-heap)
-- Framebuffer optimization (skip draw when unchanged)
-- Touch event pipeline: UI → unconsumed scene handling
-
-### Input
-
-- Touch adapter pattern: XPT2046 (resistive, 1-point), GT911 (capacitive, 5-point)
-- State machine gesture detection: Click, DoubleClick, LongPress, DragStart/Move/End
-- Pull-based event dispatching
-- InputManager for physical buttons + keyboard + touch
-- ActorTouchController for touch-to-actor mapping
-
-### Entities
-
-- Godot-inspired hierarchy: Entity → Actor → PhysicsActor
-- Collision layers and masks (uint16_t bitmask)
-- Adaptable Scalar type: float on PC, Fixed16 Q16.16 on ESP32
-- Component model with lifecycle hooks (update/draw)
-
-## Modular Compilation
-
-The engine allows disabling subsystems to save memory:
-
-| Subsystem | RAM | Flash |
-|-----------|-----|-------|
-| Audio | ~8 KB | ~15 KB |
-| Physics | ~12 KB | ~25 KB |
-| UI | ~4 KB | ~20 KB |
-| Particles | ~6 KB | ~10 KB |
-| **All disabled** | **~30 KB** | **~70 KB** |
-
-## Requirements
-
-- **Compatibility**: opencode >= 0.1.0
-- **Language**: C++17
-- **Primary platform**: ESP32 (also runs on native/desktop)
-- **Test framework**: Unity (PlatformIO)
-- **Touch drivers**: XPT2046 (SPI resistive) or GT911 (I2C capacitive)
-
-## License
-
-MIT
+---
+*Built to empower developers to create highly optimized embedded games at the speed of thought.*

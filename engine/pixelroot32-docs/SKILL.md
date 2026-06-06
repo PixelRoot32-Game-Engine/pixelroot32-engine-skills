@@ -78,3 +78,6 @@ For documenting subsystem APIs, refer to the specialized skills which include AP
 | Input | `pixelroot32-touch-input` |
 | Particles | `pixelroot32-particles` |
 | Entities | `pixelroot32-entity-actor` |
+
+## Agent Constraints
+- **Documentation Rules:** Every generated comment MUST explain the *WHY* (the intent behind the code), not just the *WHAT* (what the code does).

@@ -305,3 +305,6 @@ void onUnconsumedTouchEvent(const TouchEvent& event) override {
     }
 }
 ```
+
+## Agent Constraints
+- **Event Bleeding:** At the start of ANY auto-generated touch handler, YOU MUST insert `if (event.isConsumed()) return;` to prevent events from bleeding through UI into the game world.

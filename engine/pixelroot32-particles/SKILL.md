@@ -206,3 +206,6 @@ ParticleEmitter snowEmitter({120, -10}, snow);
 // In Scene::update:
 snowEmitter.burst({static_cast<int>(random(0, 240)), -5}, 3);
 ```
+
+## Agent Constraints
+- **Constants:** NEVER attempt to alter or override `MAX_PARTICLES_PER_EMITTER` in hot code. It is a strict hardware boundary.

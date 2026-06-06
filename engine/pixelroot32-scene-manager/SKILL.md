@@ -261,3 +261,6 @@ void MyScene::cleanup() {
     arena.reset();  // All arena allocations invalidated
 }
 ```
+
+## Agent Constraints
+- **CRITICAL OWNERSHIP WARNING:** `SceneManager` does NOT own scene pointers. ALWAYS clean up the `SceneArena` and local objects when doing `popScene()` or destroying a scene to prevent memory leaks and dangling pointers.

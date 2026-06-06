@@ -203,3 +203,7 @@ For memory patterns specific to each subsystem, refer to the specialized skills:
 | Physics | `pixelroot32-physics` | 128 contacts, Fixed16, spatial grid |
 | UI | `pixelroot32-ui-system` | Widget pool, hit test cache |
 | Particles | `pixelroot32-particles` | Emitter pool, preset configs |
+
+## Agent Constraints
+- **Strict Adherence:** The recommendations here are ABSOLUTE rules for Agents.
+- **Forbidden:** NO `std::vector` with dynamic growth. NO `std::string` passed by value (use `std::string_view`). NO `std::function` (use raw function pointers). NO `std::shared_ptr`.

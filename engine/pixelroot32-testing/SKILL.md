@@ -232,3 +232,6 @@ For testing patterns specific to each subsystem, refer to the specialized skills
 | Input | `pixelroot32-touch-input` | `test_TouchEvent*`, `test_touch_calibration` |
 | Particles | `pixelroot32-particles` | `test_particle_emitter` |
 | Entities | `pixelroot32-entity-actor` | `test_actor*`, `test_entity`, `test_static_actor` |
+
+## Agent Constraints
+- **Mocks:** Any new unit test testing a dependent module MUST include and use the corresponding Mocks to isolate the logic.

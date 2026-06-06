@@ -256,3 +256,7 @@ engine.playEvent({WaveType::PULSE, 200, 0.2f, 0.5f, 0.5f, 0,
 AudioEvent jump = {WaveType::PULSE, 300, 0.15f, 0.4f, 0.5f, 0, &INSTR_PULSE_BASS};
 engine.playEvent(jump);
 ```
+
+## Agent Constraints
+- **Feature Gate:** ALWAYS wrap AudioEngine usage in `#if PIXELROOT32_ENABLE_AUDIO`.
+- **Testing:** If you modify audio components, YOU MUST read `pixelroot32-testing` and update/create the corresponding unit tests using Mocks.

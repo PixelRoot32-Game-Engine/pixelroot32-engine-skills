@@ -269,3 +269,6 @@ map.paletteIndices = perCellPalette;  // width*height array of slot indices
 // Each cell uses a different palette slot (0-7)
 renderer.drawTileMap(map, 0, 0, LayerType::Static);
 ```
+
+## Agent Constraints
+- **Pointers:** Custom palettes passed to the renderer MUST be declared as `static` or `const` globally. NEVER pass a pointer to a stack-allocated array that will go out of scope.

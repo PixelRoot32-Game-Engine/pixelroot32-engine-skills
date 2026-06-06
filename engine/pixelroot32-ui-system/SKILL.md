@@ -337,3 +337,7 @@ volSlider.setOnChange([](float v) {
     audioEngine.setMasterVolume(v);
 });
 ```
+
+## Agent Constraints
+- **Consumption:** YOU MUST call `event.consume()` when handling a touch event in a UI widget.
+- **Ownership:** YOU MUST call `ui.removeElement()` BEFORE destroying a local widget to prevent dangling pointers.

@@ -209,3 +209,7 @@ ball.setRadius(toScalar(4));
 ball.setRestitution(toScalar(0.8f));
 ball.setBounce(true);
 ```
+
+## Agent Constraints
+- **Allocation:** NEVER use `new` or `malloc` to instantiate Actors in the game loop. YOU MUST use `SceneArena` or fixed arrays.
+- **Testing:** If you modify `update` or core logic, YOU MUST run a cross-test or request the user to test the logic.

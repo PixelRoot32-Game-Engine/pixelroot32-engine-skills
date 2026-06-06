@@ -169,3 +169,7 @@ log(LogLevel::Warning, "Low memory: %d bytes", freeRAM);
 - Do NOT use internal namespaces
 - Do NOT create runtime allocations in game loop
 - Always use fully-qualified names in headers
+
+## Agent Constraints
+- **Language Restrictions:** YOU MUST NOT use C++ exceptions (`try`, `catch`, `throw`). The `-fno-exceptions` flag is strictly enforced.
+- **RTTI:** YOU MUST NOT use RTTI (`dynamic_cast`, `typeid`).

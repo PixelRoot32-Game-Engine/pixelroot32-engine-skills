@@ -116,3 +116,6 @@ camera.apply(renderer, effects.getOffset());
 Scalar parallaxOffset = camera.getX() * parallaxFactor;
 renderer.drawSprite(bgSprite, static_cast<int>(parallaxOffset), 0);
 ```
+
+## Agent Constraints
+- **Memory:** NEVER use `new` to allocate camera effects dynamically.

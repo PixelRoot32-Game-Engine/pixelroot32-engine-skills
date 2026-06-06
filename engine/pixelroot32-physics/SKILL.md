@@ -251,3 +251,7 @@ PhysicsActor bullet(0, 100, 4, 4);
 bullet.setVelocity(400.0f, 0);  // Exceeds CCD_THRESHOLD
 // CCD automatically sweeps against static bodies
 ```
+
+## Agent Constraints
+- **Data Types:** NEVER use raw `float` for physics calculations. YOU MUST use `toScalar()` and the `Scalar` type to maintain ESP32 no-FPU compatibility.
+- **Testing:** Any change to the collision solver or physics logic REQUIRES an update to the unit tests in `pixelroot32-testing`.
