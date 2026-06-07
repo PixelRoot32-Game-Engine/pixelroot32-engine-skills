@@ -109,10 +109,16 @@ private:
 class GameScene : public pixelroot32::core::Scene {
 public:
     void init() override {
+        Scene::init();   // idempotent — resetState() + physicsScheduler.init()
         player = std::make_unique<Player>(100, 100, 16, 16);
         addEntity(player.get());
     }
-    
+
+    void resetState() noexcept override {
+        player.reset();          // release BEFORE base reset
+        Scene::resetState();
+    }
+
 private:
     std::unique_ptr<Player> player;
 };

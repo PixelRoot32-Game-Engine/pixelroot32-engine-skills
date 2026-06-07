@@ -12,7 +12,7 @@ metadata:
 
 ## Overview
 
-PixelRoot32 provides a Scene-based game architecture inspired by Godot Engine. `SceneManager` manages a stack of scenes with push/pop navigation and transition effects (Fade, Iris). Each `Scene` owns an array of `Entity` instances with layer-based rendering, optional physics integration, UI system integration, and camera effects. The scene lifecycle: `init()` → `update()`/`draw()` loop → cleanup on removal.
+PixelRoot32 provides a Scene-based game architecture inspired by Godot Engine. `SceneManager` manages a stack of scenes with push/pop navigation and transition effects (Fade, Iris, DiagonalWipe). Each `Scene` owns an array of `Entity` instances with layer-based rendering, optional physics integration, UI system integration, and camera effects. The scene lifecycle: `init()` (idempotent) → `update()`/`draw()` loop → `resetState()` on re-init.
 
 ## Key APIs
 
@@ -24,10 +24,14 @@ PixelRoot32 provides a Scene-based game architecture inspired by Godot Engine. `
 ```cpp
 class GameScene : public Scene {
     void init() override {
-        // Initialize physics
-        #if PIXELROOT32_ENABLE_PHYSICS
-            physicsScheduler.init();
-        #endif
+        Scene::init();   // resetState() + physicsScheduler.init() — always call base first
+        // Create entities, init arena, etc.
+    }
+
+    void resetState() noexcept override {
+        // Release owned resources BEFORE base reset (unique_ptr, external refs)
+        player.reset();
+        Scene::resetState();   // clears entities, arena, collisionSystem
     }
 
     void update(unsigned long deltaTime) override {
@@ -52,6 +56,9 @@ class GameScene : public Scene {
     void initUI() override { /* Add UI elements */ }
     void updateUI(unsigned long dt) override { /* Update UI */ }
     bool shouldRedrawFramebuffer() const override { return true; }
+
+private:
+    std::unique_ptr<Player> player;
 };
 ```
 
@@ -107,6 +114,9 @@ manager.transitionToScene(&gameScene, TransitionType::Fade, 500);
 manager.transitionToScene(&gameScene, TransitionType::Iris, 300,
                           120, 120,   // Iris out center
                           120, 120);  // Iris in center
+
+// DiagonalWipe transition
+manager.transitionToScene(&gameScene, TransitionType::DiagonalWipe, 400);
 
 // State query
 bool transitioning = manager.isTransitioning();
@@ -177,11 +187,16 @@ Engine::runFrame():
 ```
 class LevelScene : public Scene {
     void init() override {
-        Scene::init();         // init physicsScheduler
+        Scene::init();         // resetState() + physicsScheduler.init()
         initUI();              // Set up UI elements
         arena.init(pool, size);
         player = arenaNew<Player>(arena, x, y);
         addEntity(player);
+    }
+
+    void resetState() noexcept override {
+        player = nullptr;      // arena allocations invalidated by base reset
+        Scene::resetState();
     }
 
     void update(dt) override {
@@ -226,6 +241,8 @@ gameScene → pushScene(pauseOverlay)
 5. **Entity sorting**: `needsSorting` flag triggers layer-based sorting. Set it when adding/changing entity render layers.
 6. **Framebuffer optimization**: If ALL stacked scenes return `false` from `shouldRedrawFramebuffer()`, the engine skips `draw()` and `present()` for that frame.
 7. **Iris centers reset**: `TransitionEffect::init()` resets centers to -1. `SceneManager` stores and reapplies direction-specific centers.
+8. **Idempotent `init()`**: `Scene::init()` calls `resetState()` first. N invocations must not leak resources or leave dangling pointers. Always call `Scene::init()` in overrides — never call `physicsScheduler.init()` directly.
+9. **`resetState()` for owned resources**: Scenes with `unique_ptr` or external references must override `resetState()`, release owned resources **before** calling `Scene::resetState()` as the last operation.
 
 ## Common Patterns
 
@@ -252,13 +269,14 @@ manager.transitionToScene(&game, TransitionType::Iris, 500, 120, 120, 120, 120);
 alignas(alignof(max_align_t)) unsigned char pool[4096];
 
 void MyScene::init() {
+    Scene::init();
     arena.init(pool, sizeof(pool));
     Player* p = arenaNew<Player>(arena, 50, 50);
     addEntity(p);
 }
 
-void MyScene::cleanup() {
-    arena.reset();  // All arena allocations invalidated
+void MyScene::resetState() noexcept {
+    Scene::resetState();   // arena.reset() + clearEntities() — invalidates arena allocations
 }
 ```
 

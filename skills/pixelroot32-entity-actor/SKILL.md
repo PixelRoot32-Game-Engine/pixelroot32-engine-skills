@@ -1,6 +1,6 @@
 ---
 name: pixelroot32-entity-actor
-description: Core entity/actor hierarchy with Entity as base class, Actor with collision layers/masks, PhysicsActor with 4 body types (Static, Kinematic, Rigid, Sensor), Fixed16 math, and component model. Use when creating game objects, defining collision behavior, or extending the entity system.
+description: Core entity/actor hierarchy with Entity as base class, Actor with collision layers/masks, PhysicsActor with 4 body types (Static, Kinematic, Rigid, Sensor), KinematicActor for character controllers, Fixed16 math, and component model. Use when creating game objects, defining collision behavior, or extending the entity system.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
@@ -12,7 +12,7 @@ metadata:
 
 ## Overview
 
-PixelRoot32 uses a Godot-inspired hierarchy: `Entity` → `Actor` → `PhysicsActor`, with specialized actor types for physics. `Entity` is the abstract base for all game objects with position/size, lifecycle (update/draw), and layer-based rendering. `Actor` adds collision layers and masks. `PhysicsActor` adds velocity, gravity, body types, and collision shapes. The system uses adaptable `Scalar` type (float on PC, Fixed16 Q16.16 on ESP32).
+PixelRoot32 uses a Godot-inspired hierarchy: `Entity` → `Actor` → `PhysicsActor` → `KinematicActor`, with specialized actor types for physics. `Entity` is the abstract base for all game objects with position/size, lifecycle (update/draw), and layer-based rendering. `Actor` adds collision layers and masks. `PhysicsActor` adds velocity, gravity, body types, and collision shapes. `KinematicActor` adds script-driven movement with `moveAndSlide` for character controllers. The system uses adaptable `Scalar` type (float on PC, Fixed16 Q16.16 on ESP32).
 
 ## Key APIs
 
@@ -108,6 +108,47 @@ actor.setUserData((void*)tileData);
 void* data = actor.getUserData();
 ```
 
+### KinematicActor (Character Controller)
+
+**Header**: `include/physics/KinematicActor.h`
+**Namespace**: `pixelroot32::physics`
+**Inherits**: `pixelroot32::core::PhysicsActor`
+
+Use for player characters and script-driven movement. **Do not** use a generic `PhysicsActor` with `setBodyType(KINEMATIC)` for platformer-style slide/snap — derive from `KinematicActor` instead.
+
+```cpp
+class Player : public pixelroot32::physics::KinematicActor {
+    Player() : KinematicActor(0, 0, 16, 16) {
+        setCollisionLayer(PLAYER_LAYER);
+        setCollisionMask(WALL_LAYER | ENEMY_LAYER);
+    }
+
+    void update(unsigned long deltaTime) override {
+        float dt = deltaTime * 0.001f;
+        Vector2 vel = getVelocity();
+        vel.y += toScalar(gravity * dt);
+        vel.x = toScalar(inputX * speed);
+
+        bool jumpThisFrame = wantsJump && is_on_floor();
+        if (jumpThisFrame) {
+            vel.y = toScalar(-jumpImpulse);
+            clearFloorVelocity();
+        }
+
+        Vector2 snap = jumpThisFrame ? Vector2{} : Vector2{0, MIN_SNAP};
+        vel = moveAndSlide(vel, toScalar(dt), {0, -1}, SnapPolicy::Step, snap);
+        setVelocity(vel.x, vel.y);
+    }
+};
+
+// Contact queries (current frame only)
+actor.is_on_floor();
+actor.is_on_wall();
+actor.is_on_ceiling();
+actor.getFloorVelocity();    // KINEMATIC floor platform velocity
+actor.clearFloorVelocity();  // call on jump
+```
+
 ### Physics Body Types
 
 | BodyType | Gravity | Forces | Manual Move | Collision Response |
@@ -116,6 +157,8 @@ void* data = actor.getUserData();
 | `KINEMATIC` | No | No | Via `setVelocity` | Stops at obstacles |
 | `RIGID` | Yes | Yes | Yes | Full physics simulation |
 | Sensor flag | No | No | Yes | Events only, no response |
+
+**Note**: `PhysicsBodyType::KINEMATIC` is a body-type flag on `PhysicsActor`. For character controllers with slide/snap, use the **`KinematicActor` subclass** instead.
 
 ### CollisionShape
 
@@ -138,18 +181,21 @@ PIXELROOT32_LOG_ERROR("Entity not found: %d", entityId);
 
 ### Custom game actor with physics
 ```
-class Player : public PhysicsActor {
-    Player() : PhysicsActor(0, 0, 16, 16) {
-        setBodyType(PhysicsBodyType::KINEMATIC);
+class Player : public KinematicActor {
+    Player() : KinematicActor(0, 0, 16, 16) {
         setCollisionLayer(PLAYER_LAYER);
         setCollisionMask(WALL_LAYER | ENEMY_LAYER);
         setWorldBounds(levelWidth, levelHeight);
     }
 
     void update(dt) override {
-        // Manual velocity for KINEMATIC
-        setVelocity(inputX * speed, velocity.y);
-        PhysicsActor::update(dt);
+        float dtSec = dt * 0.001f;
+        Vector2 vel = getVelocity();
+        vel.y += toScalar(gravity * dtSec);
+        vel.x = toScalar(inputX * speed);
+        vel = moveAndSlide(vel, toScalar(dtSec), {0, -1}, SnapPolicy::Step,
+                           jumpThisFrame ? Vector2{} : Vector2{0, MIN_SNAP});
+        setVelocity(vel.x, vel.y);
     }
 
     void onCollision(Actor* other) override {
@@ -189,6 +235,8 @@ class TriggerZone : public PhysicsActor {
 5. **World bounds vs LimitRect**: If both are set, `LimitRect` takes priority. World bounds are used only when no custom LimitRect is set.
 6. **Bounce flag**: `setBounce(true)` reflects velocity on static contact. `setBounce(false)` zeroes velocity on contact.
 7. **Render layer 1**: Default for Entity. UI elements default to layer 2. Higher layers draw on top.
+8. **Character controllers use `KinematicActor`**: Do not call `PhysicsActor::update()` for slide/snap movement — use `moveAndSlide()` and assign the returned velocity.
+9. **`is_on_*` is frame-local**: `is_on_floor()`, `is_on_wall()`, `is_on_ceiling()` reflect only the last `moveAndSlide` call in the current frame.
 
 ## Common Patterns
 

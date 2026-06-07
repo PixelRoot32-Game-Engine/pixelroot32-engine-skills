@@ -164,6 +164,42 @@ if (flags & TileFlags::ONEWAY) { /* one-way platform */ }
 if (flags & TileFlags::SENSOR) { /* trigger zone */ }
 ```
 
+### KinematicActor (Character Controller)
+
+**Header**: `include/physics/KinematicActor.h`
+**Namespace**: `pixelroot32::physics`
+**Inherits**: `pixelroot32::core::PhysicsActor`
+
+Script-driven bodies with slide/snap collision. Use for player characters and other manually moved actors — not the same as setting `PhysicsBodyType::KINEMATIC` on a generic `PhysicsActor`.
+
+```cpp
+enum class SnapPolicy { None, Step, Continuous };
+
+KinematicActor player(100, 100, 16, 16);
+Vector2 velocity = player.getVelocity();
+
+// dt is required (seconds). Assign the returned velocity.
+velocity = player.moveAndSlide(
+    velocity,
+    toScalar(deltaTime * 0.001f),
+    {0, -1},                          // upDirection
+    SnapPolicy::Step,
+    jumpThisFrame ? Vector2{} : Vector2{0, KinematicActor::MIN_SNAP},
+    &floorBody                        // optional KINEMATIC floor pointer
+);
+
+// Current-frame contact state (no persistence across frames)
+player.is_on_floor();
+player.is_on_wall();
+player.is_on_ceiling();
+
+// Platform velocity inheritance (KINEMATIC floors)
+const Vector2& floorVel = player.getFloorVelocity();
+player.clearFloorVelocity();          // call on jump
+```
+
+**Do not use** `moveAndSlideWithSnap` — removed; snap is unified via `SnapPolicy` + `snapVector`.
+
 ## 6-Step Pipeline Order
 
 ```
@@ -181,6 +217,7 @@ if (flags & TileFlags::SENSOR) { /* trigger zone */ }
 |-----------|-----------|-------------|-----------------|------------------|
 | `PhysicsActor` STATIC | Static | Static layer | Blocks others | onCollision |
 | `PhysicsActor` KINEMATIC | Kinematic | Dynamic layer | Stops on contact | KinematicCollision |
+| `KinematicActor` (class) | Kinematic | Dynamic layer | `moveAndSlide` / `moveAndCollide` | KinematicCollision + `is_on_*` |
 | `PhysicsActor` RIGID | Rigid | Dynamic layer | Full resolution | Contact |
 | `PhysicsActor` sensor=true | Sensor | Dynamic layer | None | onCollision (events only) |
 | `Actor` (base) | — | Not added | None | onCollision |
@@ -189,8 +226,8 @@ if (flags & TileFlags::SENSOR) { /* trigger zone */ }
 
 ### Scene physics setup
 ```
-Scene::init():
-  ├── physicsScheduler.init()
+Scene::init():                        // idempotent — calls resetState() internally
+  ├── Scene::init()                   // resetState() + physicsScheduler.init()
   ├── TileCollisionBuilder builder(scene, {16, 16})
   ├── builder.buildMergedFromBehaviorLayer(wallLayer, 0)
   └── builder.buildFromBehaviorLayer(triggerLayer, 1)
@@ -202,10 +239,14 @@ Scene::update(dt):
 
 ### Kinematic character controller
 ```
+Player : public KinematicActor
+
 Player::update(dt):
-  ├── setVelocity(inputX * speed, velocity.y + gravity)
-  ├── PhysicsActor::update(dt)  // Integrate velocity
-  └── // Read worldCollisionInfo for landing/wall detection
+  ├── velocity.y += gravity * dt
+  ├── velocity.x = inputX * speed
+  ├── snap = jumpThisFrame ? Vector2{} : Vector2{0, MIN_SNAP}
+  ├── velocity = moveAndSlide(velocity, toScalar(dt), {0,-1}, SnapPolicy::Step, snap)
+  └── if (jump) clearFloorVelocity()
 ```
 
 ## ESP32 Constraints
@@ -225,6 +266,11 @@ Player::update(dt):
 5. **One-way platforms**: Rely on previous-position crossing detection. If teleporting an actor, call `setPosition()` to sync `previousPosition`.
 6. **Accumulator is never clamped**: `PhysicsScheduler` preserves real time. If the game lags heavily, it will run multiple catch-up steps (max 4).
 7. **TileCollisionBuilder entity count**: Returns -1 if the entity limit is exceeded. Check the return value.
+8. **`moveAndSlide` requires explicit `dt`**: Pass delta time in seconds (`deltaTime * 0.001f`). There is no default parameter.
+9. **Assign `moveAndSlide` return value**: The method returns resolved velocity; always assign back to the caller's velocity variable.
+10. **Disable snap on jump explicitly**: Pass `snapVector = Vector2{}` on jump frames — upward velocity does not auto-disable snap.
+11. **`SnapPolicy::Continuous` is reserved**: Currently behaves as `None` (debug builds assert once).
+12. **`MIN_SNAP` threshold**: Snap is skipped when `snapVector` magnitude is below `KinematicActor::MIN_SNAP` (4.0).
 
 ## Common Patterns
 
