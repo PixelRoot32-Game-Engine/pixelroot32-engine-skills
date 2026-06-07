@@ -19,7 +19,7 @@ We use the official [skills.sh](https://skills.sh/) CLI to distribute these skil
 1. **Install a specific skill via npx:** 
    Run the following command for the subsystem you need. For example, to install the audio skill:
    ```bash
-   npx skills add PixelRoot32-Game-Engine/pixelroot32-engine-skills/pixelroot32-audio
+   npx skills add PixelRoot32-Game-Engine/pixelroot32-engine-skills/skills/pixelroot32-audio
    ```
 2. **Contextualize your Agent:** The CLI will automatically copy the skill to your agent's config folder (e.g. `.cursor/rules` or `.gemini/config/skills`).
 3. **Prompt freely:** Ask your AI to build features. For example: *"Create a new Scene with a pause menu using `pixelroot32-scene-manager` and `pixelroot32-ui-system`"*.
