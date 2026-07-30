@@ -196,6 +196,10 @@ player.is_on_ceiling();
 // Platform velocity inheritance (KINEMATIC floors)
 const Vector2& floorVel = player.getFloorVelocity();
 player.clearFloorVelocity();          // call on jump
+
+// Top-surface floor validation (default true)
+player.setStrictTopSurfaceFloor(false);  // opt out for custom edge-anchor mechanics
+bool strict = player.isStrictTopSurfaceFloor();
 ```
 
 **Do not use** `moveAndSlideWithSnap` — removed; snap is unified via `SnapPolicy` + `snapVector`.
@@ -271,6 +275,7 @@ Player::update(dt):
 10. **Disable snap on jump explicitly**: Pass `snapVector = Vector2{}` on jump frames — upward velocity does not auto-disable snap.
 11. **`SnapPolicy::Continuous` is reserved**: Currently behaves as `None` (debug builds assert once).
 12. **`MIN_SNAP` threshold**: Snap is skipped when `snapVector` magnitude is below `KinematicActor::MIN_SNAP` (4.0).
+13. **Top-surface floor validation**: With `strictTopSurfaceFloor` (default true), floor state and kinematic carry require horizontal overlap on the platform's top face — actors detach when walking off the top edge. Narrow hitboxes standing on platform edges (including one-way edges) are supported without being pushed off. Call `setStrictTopSurfaceFloor(false)` only for custom edge-anchor mechanics.
 
 ## Common Patterns
 

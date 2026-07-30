@@ -1,6 +1,6 @@
 ---
 name: pixelroot32-audio
-description: NES-style 8-voice audio subsystem with 5 wave types (Pulse, Triangle, Noise, Sine, Saw), ADSR+LFO+sweep envelopes, Q15 no-FPU path, SPSC command queue, multi-track sequencer, and MusicPlayer. Use when implementing sound effects, music playback, or audio pipeline configuration.
+description: NES-style 8-voice audio subsystem (4 music + 4 SFX voice partition) with 5 wave types (Pulse, Triangle, Noise, Sine, Saw), ADSR+LFO envelopes, Linear/Exponential frequency sweeps, duty/pitch breakpoint tables, looping SFX, SFX bank playback, Q15 no-FPU path, SPSC command queue, multi-track sequencer, and MusicPlayer. Use when implementing sound effects, music playback, or audio pipeline configuration.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
@@ -13,7 +13,7 @@ metadata:
 
 ## Overview
 
-PixelRoot32 provides an NES-style audio subsystem with dynamic 8-voice pooling, 5 wave types, per-voice ADSR envelopes, LFO modulation, frequency sweep, and a multi-track music sequencer. The architecture separates synthesis (`ApuCore`) from scheduling (`AudioScheduler`) and exposes a facade (`AudioEngine`) for game code. A lock-free SPSC command queue mediates between game and audio threads.
+PixelRoot32 provides an NES-style audio subsystem with an 8-voice pool partitioned 4+4 (slots 0–3 for sequencer music tracks, slots 4–7 for SFX and percussion), 5 wave types, per-voice ADSR envelopes, LFO modulation, Linear/Exponential frequency sweeps, duty/pitch breakpoint automation, looping SFX, and a multi-track music sequencer. The architecture separates synthesis (`ApuCore`) from scheduling (`AudioScheduler`) and exposes a facade (`AudioEngine`) for game code. A lock-free SPSC command queue mediates between game and audio threads.
 
 ## Key APIs
 
@@ -27,6 +27,10 @@ PixelRoot32 provides an NES-style audio subsystem with dynamic 8-voice pooling, 
 AudioConfig config(backend, 22050);  // backend, sampleRate
 AudioEngine engine(config, caps);
 engine.init();
+
+// Re-sync the APU when the backend grants a different device rate
+// (e.g. SDL with SDL_AUDIO_ALLOW_FREQUENCY_CHANGE)
+engine.reinitSampleRate(confirmedDeviceHz);
 
 // One-shot sounds
 engine.playEvent({WaveType::PULSE, 440.0f, 0.5f, 0.8f, 0.5f});
@@ -48,6 +52,12 @@ bool paused = engine.isMusicPaused();
 ```cpp
 ApuCore apu;
 apu.init(22050);  // sample rate
+
+// Voice partition constants (MAX_VOICES = 8)
+ApuCore::MUSIC_VOICE_BASE;   // 0 — first sequencer track slot (trackIdx maps 1:1)
+ApuCore::MUSIC_VOICE_COUNT;  // 4 (= MAX_MUSIC_TRACKS)
+ApuCore::SFX_VOICE_BASE;     // 4 — first PLAY_EVENT / percussion slot
+ApuCore::SFX_VOICE_COUNT;    // 4
 
 // Command submission (thread-safe via SPSC queue)
 apu.submitCommand(cmd);
@@ -123,6 +133,36 @@ queue.dequeue(out);
 size_t dropped = queue.getDroppedCommands();
 ```
 
+Strictly one producer + one consumer — concurrent multi-producer use is not supported (the enqueue path has no CAS retry).
+
+### SFX Bank Playback (Helper)
+
+**Header**: `include/audio/SfxBankPlayback.h`
+**Namespace**: `pixelroot32::audio`
+
+Header-only helper to play Tool Suite–style SFX bank entries: layers fire at t=0, timed sequence steps are delegated to a game-owned scheduler. Zero-allocation; the helper does not own timing.
+
+```cpp
+// Bank must expose a static API:
+//   static uint8_t layerCount(SfxId);
+//   static AudioEvent layerEvent(SfxId, uint8_t);
+//   static uint8_t sequenceStepCount(SfxId);
+//   static SequenceStep sequenceStep(SfxId, uint8_t);  // {float delaySec; AudioEvent event;}
+
+playSfxBank<MySfxBank>(engine, SfxId::Coin, myScheduler);
+
+// Scheduler implementations (subclass SfxDelayScheduler):
+NullSfxDelayScheduler noDelays;             // banks with simultaneous layers only
+ImmediateSfxDelayScheduler now(engine);     // test/stub: ignores delays
+// Game code: implement schedule(delaySec, event) with a scene timer
+```
+
+## Voice Allocation (4+4 Partition)
+
+- **Slots 0–3 (music)**: Reserved for sequencer melodic tracks; `trackIdx` maps 1:1 to slot in O(1). Melodic tracks never steal from each other, and SFX cannot interrupt melodic notes.
+- **Slots 4–7 (SFX)**: Shared subpool for `PLAY_EVENT` effects and sequencer percussion hits. Voice stealing is confined to this subpool, and the steal ranking prefers reclaiming looped voices first.
+- **Percussion overflow**: When the SFX subpool is saturated, a percussion hit may borrow an *idle* music voice — it never interrupts an active melodic note.
+
 ## Wave Types
 
 | Wave | Enum | Characteristics |
@@ -146,7 +186,47 @@ event.noisePeriod = 0;        // NOISE: 0=auto, >0=direct LFSR period
 event.preset = &INSTR_PULSE_LEAD;  // Instrument preset (ADSR, LFO)
 event.sweepEndHz = 880.0f;    // Frequency sweep end
 event.sweepDurationSec = 0.3f;// Sweep duration
+event.loop = false;           // true = continuous until STOP_CHANNEL (or steal)
+event.sweepCurve = SweepCurve::Linear;  // or SweepCurve::Exponential
+event.dutySteps = nullptr;    // PULSE: stepped duty table (SfxBreakpoint*)
+event.dutyStepCount = 0;      // max kMaxSfxDutySteps (4)
+event.pitchEnvelope = nullptr;// multi-breakpoint pitch table (SfxBreakpoint*)
+event.pitchEnvelopeCount = 0; // max kMaxSfxPitchPoints (4); >= 2 to activate
 ```
+
+### Frequency Sweep
+
+Active iff `sweepDurationSec > 0` and `sweepEndHz > 0`. Works on **all wave types**: melodic waves interpolate `frequency → sweepEndHz`; NOISE interpolates the LFSR clock Hz (and thus the period). `SweepCurve::Exponential` is geometric in Hz (falls back to Linear if start/end are not both > 0). Duration is clamped to note length for one-shots; looping voices run the full `sweepDurationSec`.
+
+### Breakpoint Tables (SfxBreakpoint)
+
+```cpp
+struct SfxBreakpoint { float timeSec; float value; };  // time from voice start; non-decreasing
+
+static constexpr SfxBreakpoint kLaserDuty[] = {{0.0f, 0.50f}, {0.05f, 0.25f}, {0.10f, 0.125f}};
+event.dutySteps = kLaserDuty;         // PULSE only; hold semantics between points
+event.dutyStepCount = 3;              // ignores InstrumentPreset::dutySweep while active
+
+static constexpr SfxBreakpoint kFallPitch[] = {{0.0f, 880.0f}, {0.1f, 440.0f}, {0.3f, 110.0f}};
+event.pitchEnvelope = kFallPitch;     // >= 2 points supersede the single-segment sweep
+event.pitchEnvelopeCount = 3;
+```
+
+Tables MUST point to `static`/`constexpr` data (the voice holds pointer + count). FPU and Q15 paths supported; no heap allocation in `generateSamples()`.
+
+### Looping SFX and Stop
+
+```cpp
+event.loop = true;            // voice stays enabled — no auto-disable
+engine.playEvent(event);
+
+AudioCommand stop{};
+stop.type = AudioCommandType::STOP_CHANNEL;
+stop.channelIndex = voiceSlot;        // SFX slots are 4-7
+engine.submitCommand(stop);
+```
+
+When `loop == false`, `duration <= 0` disables the voice immediately — it never leaves a hanging voice.
 
 ## Instrument Presets
 
@@ -161,9 +241,11 @@ event.sweepDurationSec = 0.3f;// Sweep duration
 | `INSTR_PULSE_HARMONY` | Pulse | 12.5% | Harmony with tremolo |
 | `INSTR_TRIANGLE_BASS` | Triangle | — | Tight bass |
 | `INSTR_PULSE_BASS` | Pulse | 25% | Punchy bass |
-| `INSTR_KICK` | Noise | 0% | Percussion: kick drum |
-| `INSTR_SNARE` | Noise | 0% | Percussion: snare (93-step) |
+| `INSTR_KICK` | Noise | 0% | Percussion: kick drum (noisePeriod 60) |
+| `INSTR_SNARE` | Noise | 0% | Percussion: snare (93-step, noisePeriod 15) |
 | `INSTR_HIHAT` | Noise | 0% | Percussion: hi-hat (93-step) |
+
+`InstrumentPreset` also supports an optional pitch sweep: set `pitchSweepEndHz` and `pitchSweepDurationSec` (both > 0 to activate) — materialized into the event's `sweep*` fields at note-on. When defining custom presets with brace-init, these are the last two fields.
 
 ## Music Track Format
 
@@ -194,6 +276,13 @@ player.play(track);
 ```
 
 Note helpers: `makeNote(preset, note, octave, duration)`, `makeNote(preset, note, duration)`, `makeRest(duration)`.
+
+### Note Duration Semantics
+
+- `MusicNote::duration` is the sequencer advance in **beats** (quarter note = 1.0; `ApuCore::TICKS_PER_BEAT` = 4).
+- `duration == 0.0` fires a **stacked hit** without advancing tempo — use it to layer Kick/Snare/Hi-Hat on the same step of the NOISE track.
+- On the percussion track, only **`Rest` + noise preset** counts as a drum hit; a plain `Rest` (no preset) remains silence and a melodic `Rest` is a track-scoped note-off (it only releases that track's voice).
+- When `tempoFactor > 1` truncates a note to 0 ticks, the sequencer clamps to 1 tick minimum.
 
 ## Composition Patterns
 
@@ -241,6 +330,10 @@ Scene::update(dt):
 5. **Bitcrush**: `setMasterBitcrush(bits)` with bits 0 disables the effect. Values 1-15 re-quantize the final int16 output.
 6. **MusicTrack lifetime**: The `MusicTrack` and its `MusicNote` array must remain in scope for the duration of playback — the sequencer references them by pointer.
 7. **Profile ring buffer**: `PROFILE_RING_SIZE` is 64 entries. Get-and-reset semantics: each call drains all pending entries.
+8. **Looping voices never auto-stop**: `loop = true` keeps the voice enabled until `STOP_CHANNEL` or a steal. Always pair a looping `playEvent` with an explicit stop path (e.g. on scene exit).
+9. **Breakpoint tables dangle like presets**: `dutySteps` and `pitchEnvelope` are pointer+count — the tables must be `static`/`constexpr`, with non-decreasing `timeSec`.
+10. **SFX voice stealing is subpool-local**: Effects can only steal slots 4–7 (looped voices are reclaimed first). If 4 non-looping SFX are active, a new effect steals one of them — melodic music voices are never interrupted.
+11. **Sequencer track slots are fixed**: Track N always plays on voice slot N (0–3). `STOP_CHANNEL` with `channelIndex` 0–3 kills a music track's voice.
 
 ## Common Patterns
 
@@ -255,6 +348,36 @@ engine.playEvent({WaveType::PULSE, 200, 0.2f, 0.5f, 0.5f, 0,
 ```cpp
 AudioEvent jump = {WaveType::PULSE, 300, 0.15f, 0.4f, 0.5f, 0, &INSTR_PULSE_BASS};
 engine.playEvent(jump);
+```
+
+### Looping engine hum (stop on scene exit)
+```cpp
+AudioEvent hum{};
+hum.type = WaveType::TRIANGLE;
+hum.frequency = 55.0f;
+hum.volume = 0.3f;
+hum.loop = true;
+engine.playEvent(hum);
+
+// Later (e.g. Scene::resetState or onExit):
+AudioCommand stop{};
+stop.type = AudioCommandType::STOP_CHANNEL;
+stop.channelIndex = slot;  // SFX subpool: 4-7
+engine.submitCommand(stop);
+```
+
+### Falling pitch with exponential curve
+```cpp
+AudioEvent fall{};
+fall.type = WaveType::PULSE;
+fall.frequency = 880.0f;
+fall.duration = 0.4f;
+fall.volume = 0.6f;
+fall.duty = 0.5f;
+fall.sweepEndHz = 110.0f;
+fall.sweepDurationSec = 0.4f;
+fall.sweepCurve = SweepCurve::Exponential;
+engine.playEvent(fall);
 ```
 
 ## Agent Constraints
