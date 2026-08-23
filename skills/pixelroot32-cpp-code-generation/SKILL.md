@@ -1,12 +1,13 @@
 ---
 name: pixelroot32-cpp-code-generation
-description: Generate C++17 code following PixelRoot32 engine conventions, naming patterns, and architectural practices
+description: Generate C++17 code following PixelRoot32 engine conventions, naming patterns, architectural practices, and Doxygen documentation standards. Use when writing or refactoring engine or game C++ source, choosing namespaces and include paths, documenting classes and methods, or routing to a subsystem-specific skill.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
   domain: engine
   language: cpp
   platform: cross-platform
+  engine_version: "1.9.0+unreleased"
 ---
 
 ## Overview
@@ -39,7 +40,13 @@ All code generation must reference:
   - `pixelroot32::input`
   - `pixelroot32::physics`
   - `pixelroot32::math`
+  - `pixelroot32::gameplay`
   - `pixelroot32::audio` (when `PIXELROOT32_ENABLE_AUDIO=1`)
+
+Notes:
+- `pixelroot32::math` also carries `ProjectionSpec`, `CellRange` and the projection free functions (see `pixelroot32-projection`).
+- `pixelroot32::graphics::particles` exists for emitters and presets (see `pixelroot32-particles`).
+- `pixelroot32::gameplay` holds the reusable gameplay building blocks (see `pixelroot32-gameplay-framework`).
 
 - **Internal namespaces** (do NOT use directly):
   - `pixelroot32::platform`
@@ -140,6 +147,8 @@ renderer.drawSprite(sprite, static_cast<int>(x), static_cast<int>(y), Color::Whi
 
 ## Subsystem Skills
 
+This table is the **canonical routing table** for the skill catalog. Other cross-cutting skills (`pixelroot32-memory-optimization`, `pixelroot32-testing`) must point here instead of restating it.
+
 For subsystem-specific code generation, use the specialized skills:
 
 | Subsystem | Skill | Use When |
@@ -153,6 +162,8 @@ For subsystem-specific code generation, use the specialized skills:
 | Input | `pixelroot32-touch-input` | Touch events, state machine |
 | Particles | `pixelroot32-particles` | Emitters, presets |
 | Entities | `pixelroot32-entity-actor` | Actor types, lifecycle |
+| Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected camera bounds |
+| Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
 
 For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`.
 
@@ -168,6 +179,59 @@ log("Player position: %d, %d", static_cast<int>(x), static_cast<int>(y));
 log(LogLevel::Warning, "Low memory: %d bytes", freeRAM);
 ```
 
+## Documentation (Doxygen)
+
+Documentation is part of code generation: every new or edited public class, struct or method ships with its Doxygen block.
+
+### Rules
+
+- **Location**: documentation lives in the header (`.h`), never in the implementation (`.cpp`). The header is the single source of truth.
+- **Format**: `/** ... */` block comments.
+- **Classes/structs**: `@class` (or `@struct`) plus `@brief`.
+- **Methods**: `@brief` always, one `@param` per parameter, and `@return` whenever the return type is not `void`.
+- **Language**: documentation is written in English even when the prompt is in another language, unless explicitly requested otherwise.
+- Defaulted virtuals (e.g. an empty-by-default hook such as `flushPendingTransfers()`) are documented like any other method — state the contract for overriders; subsystem semantics belong to the owning skill (for `DrawSurface`, `pixelroot32-sprite-renderer`).
+
+### Example
+
+Reference header: `include/graphics/DrawSurface.h`.
+
+```cpp
+/**
+ * @class DrawSurface
+ * @brief Abstract interface for platform-specific drawing operations.
+ *
+ * This class defines the contract for any graphics driver.
+ */
+class DrawSurface {
+public:
+    /**
+     * @brief Draws a filled rectangle.
+     * @param x Top-left X coordinate.
+     * @param y Top-left Y coordinate.
+     * @param width Width of the rectangle.
+     * @param height Height of the rectangle.
+     * @param color The fill color in RGB565 format.
+     */
+    virtual void drawFilledRectangle(int x, int y, int width, int height, uint16_t color) = 0;
+
+    /**
+     * @brief Checks if the surface is initialized.
+     * @return true if initialized, false otherwise.
+     */
+    virtual bool isInitialized() const = 0;
+};
+```
+
+### Generating the docs
+
+```bash
+# Run Doxygen generation (if configured)
+doxygen Doxyfile
+```
+
+For subsystem API details and composition patterns while documenting, route through the canonical routing table above.
+
 ## Constraints
 
 - Do NOT generate code that violates documented APIs
@@ -179,3 +243,4 @@ log(LogLevel::Warning, "Low memory: %d bytes", freeRAM);
 ## Agent Constraints
 - **Language Restrictions:** YOU MUST NOT use C++ exceptions (`try`, `catch`, `throw`). The `-fno-exceptions` flag is strictly enforced.
 - **RTTI:** YOU MUST NOT use RTTI (`dynamic_cast`, `typeid`).
+- **Documentation Rules:** Every generated comment MUST explain the *WHY* (the intent behind the code), not just the *WHAT* (what the code does).

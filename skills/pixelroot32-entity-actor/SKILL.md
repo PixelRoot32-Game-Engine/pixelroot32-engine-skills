@@ -7,12 +7,22 @@ metadata:
   domain: engine
   subsystem: core
   module: entity-actor
+  engine_version: "1.9.0+unreleased"
   platform: cross-platform
 ---
 
 ## Overview
 
 PixelRoot32 uses a Godot-inspired hierarchy: `Entity` → `Actor` → `PhysicsActor` → `KinematicActor`, with specialized actor types for physics. `Entity` is the abstract base for all game objects with position/size, lifecycle (update/draw), and layer-based rendering. `Actor` adds collision layers and masks. `PhysicsActor` adds velocity, gravity, body types, and collision shapes. `KinematicActor` adds script-driven movement with `moveAndSlide` for character controllers. The system uses adaptable `Scalar` type (float on PC, Fixed16 Q16.16 on ESP32).
+
+### Hierarchy
+
+| Class | Header | Namespace | Adds | API owner |
+|-------|--------|-----------|------|-----------|
+| `Entity` | `include/core/Entity.h` | `pixelroot32::core` | position/size, `update`/`draw`, render layer, optional `depthKey` | this skill |
+| `Actor` | `include/core/Actor.h` | `pixelroot32::core` | collision layer/mask, `getHitBox()`, `onCollision()` | this skill |
+| `PhysicsActor` | `include/core/PhysicsActor.h` | `pixelroot32::core` | velocity, gravity, body types, shapes, flags | this skill |
+| `KinematicActor` | `include/physics/KinematicActor.h` | `pixelroot32::physics` | `moveAndSlide` slide/snap character control | **`pixelroot32-physics`** |
 
 ## Key APIs
 
@@ -39,6 +49,20 @@ entity.isEnabled = true;              // Controls update() invocation
 entity.setRenderLayer(3);             // 0 to MaxLayers-1
 entity.getRenderLayer();
 ```
+
+#### `Entity::depthKey` (optional)
+
+**Feature gate**: `PIXELROOT32_ENABLE_DEPTH_SORT` — default **0**. The field exists only inside that `#if` block in `include/core/Entity.h`.
+
+```cpp
+#if PIXELROOT32_ENABLE_DEPTH_SORT
+    int16_t depthKey = 0;
+#endif
+```
+
+- **Cost**: `Entity` grows **4 bytes on a 32-bit target (28 → 32)**, 8 bytes on 64-bit native. At `MAX_ENTITIES = 64` that is 256 B total — paid only by builds that opt in.
+- **The engine never assigns and never derives `depthKey`.** `core` must not know about a projection, so nothing in the engine writes this field. Default `0` gives stable layer-only ordering.
+- Setting it is the game's job. **When and how to compute a `depthKey` belongs to `pixelroot32-projection`** — read that skill for the cell↔screen math and depth-sorting rules. `pixelroot32-scene-manager` owns the `Scene`-side comparator plumbing.
 
 ### Actor (Collision-aware Entity)
 
@@ -114,40 +138,9 @@ void* data = actor.getUserData();
 **Namespace**: `pixelroot32::physics`
 **Inherits**: `pixelroot32::core::PhysicsActor`
 
-Use for player characters and script-driven movement. **Do not** use a generic `PhysicsActor` with `setBodyType(KINEMATIC)` for platformer-style slide/snap — derive from `KinematicActor` instead.
+`KinematicActor` is the leaf of the hierarchy: it extends `core::PhysicsActor` with script-driven slide/snap movement for character controllers.
 
-```cpp
-class Player : public pixelroot32::physics::KinematicActor {
-    Player() : KinematicActor(0, 0, 16, 16) {
-        setCollisionLayer(PLAYER_LAYER);
-        setCollisionMask(WALL_LAYER | ENEMY_LAYER);
-    }
-
-    void update(unsigned long deltaTime) override {
-        float dt = deltaTime * 0.001f;
-        Vector2 vel = getVelocity();
-        vel.y += toScalar(gravity * dt);
-        vel.x = toScalar(inputX * speed);
-
-        bool jumpThisFrame = wantsJump && is_on_floor();
-        if (jumpThisFrame) {
-            vel.y = toScalar(-jumpImpulse);
-            clearFloorVelocity();
-        }
-
-        Vector2 snap = jumpThisFrame ? Vector2{} : Vector2{0, MIN_SNAP};
-        vel = moveAndSlide(vel, toScalar(dt), {0, -1}, SnapPolicy::Step, snap);
-        setVelocity(vel.x, vel.y);
-    }
-};
-
-// Contact queries (current frame only)
-actor.is_on_floor();
-actor.is_on_wall();
-actor.is_on_ceiling();
-actor.getFloorVelocity();    // KINEMATIC floor platform velocity
-actor.clearFloorVelocity();  // call on jump
-```
+**Its API is owned by `pixelroot32-physics`** — `moveAndSlide`, `SnapPolicy`, `MIN_SNAP`, `is_on_floor()`/`is_on_wall()`/`is_on_ceiling()`, floor-velocity inheritance and `strictTopSurfaceFloor` are documented there. Read that skill before writing a character controller; do not restate its signatures here.
 
 ### Physics Body Types
 
@@ -181,7 +174,7 @@ PIXELROOT32_LOG_ERROR("Entity not found: %d", entityId);
 
 ### Custom game actor with physics
 ```
-class Player : public KinematicActor {
+class Player : public pixelroot32::physics::KinematicActor {
     Player() : KinematicActor(0, 0, 16, 16) {
         setCollisionLayer(PLAYER_LAYER);
         setCollisionMask(WALL_LAYER | ENEMY_LAYER);
@@ -189,13 +182,7 @@ class Player : public KinematicActor {
     }
 
     void update(dt) override {
-        float dtSec = dt * 0.001f;
-        Vector2 vel = getVelocity();
-        vel.y += toScalar(gravity * dtSec);
-        vel.x = toScalar(inputX * speed);
-        vel = moveAndSlide(vel, toScalar(dtSec), {0, -1}, SnapPolicy::Step,
-                           jumpThisFrame ? Vector2{} : Vector2{0, MIN_SNAP});
-        setVelocity(vel.x, vel.y);
+        // Movement: moveAndSlide + SnapPolicy — see pixelroot32-physics
     }
 
     void onCollision(Actor* other) override {
@@ -235,8 +222,8 @@ class TriggerZone : public PhysicsActor {
 5. **World bounds vs LimitRect**: If both are set, `LimitRect` takes priority. World bounds are used only when no custom LimitRect is set.
 6. **Bounce flag**: `setBounce(true)` reflects velocity on static contact. `setBounce(false)` zeroes velocity on contact.
 7. **Render layer 1**: Default for Entity. UI elements default to layer 2. Higher layers draw on top.
-8. **Character controllers use `KinematicActor`**: Do not call `PhysicsActor::update()` for slide/snap movement — use `moveAndSlide()` and assign the returned velocity.
-9. **`is_on_*` is frame-local**: `is_on_floor()`, `is_on_wall()`, `is_on_ceiling()` reflect only the last `moveAndSlide` call in the current frame.
+8. **Character controllers use `KinematicActor`**: do not drive slide/snap movement through `PhysicsActor::update()` or a generic `PhysicsActor` with `setBodyType(KINEMATIC)`. Derive from `pixelroot32::physics::KinematicActor`; its movement and contact-state rules live in **`pixelroot32-physics`**.
+9. **`depthKey` is opt-in and never engine-assigned**: it exists only under `PIXELROOT32_ENABLE_DEPTH_SORT` (default 0) and stays `0` unless the game writes it. See **`pixelroot32-projection`** for how to derive one.
 
 ## Common Patterns
 

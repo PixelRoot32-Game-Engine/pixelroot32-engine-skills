@@ -8,7 +8,7 @@ This is not just standard documentation. These are **Agent Skills**—strict, co
 
 When you ask an AI to "create a new level" or "add a touch UI" for PixelRoot32, the AI reads the corresponding skill from this repository. This guarantees that the AI:
 - Writes C++17 code highly optimized for the ESP32.
-- Adheres strictly to the **Zero-Allocation** architecture (no `new`, no `std::vector`).
+- Adheres strictly to the **Zero-Allocation** architecture in the game loop (no `new`, no `std::vector` inside `update()`/`draw()`). UI layout containers are the one documented exception — `UILayout` stores its children in a heap-backed, unbounded `std::vector<UIElement*>`, so the AI builds the layout tree during `Scene::init()`/`initUI()` and never mutates it per frame.
 - Respects hardware limits (memory, spatial grids, fixed arrays).
 - Avoids hallucinations by following exact syntax for drawing, physics, and audio.
 
@@ -40,10 +40,11 @@ The suite is divided into specific engine subsystems. Your AI will dynamically l
 | `pixelroot32-particles` | How to spawn explosion or dust effects respecting the hard limit of 50 particles per emitter. |
 | `pixelroot32-touch-input` | How to map raw touch events to gestures and prevent UI events from bleeding into the game logic. |
 | `pixelroot32-camera2d` | How to manipulate the viewport, apply screen shake, and bounds clamping. |
+| `pixelroot32-projection` | How to lay a cell grid on screen with one integer `ProjectionSpec` (orthogonal, isometric 2:1 or 1:1, oblique), sort sprites by per-cell depth, and clamp the camera to projected bounds. |
 | `pixelroot32-entity-actor` | How to structure the game objects using the Godot-inspired node hierarchy. |
+| `pixelroot32-gameplay-framework` | How to assemble grid-locked movement, screen-by-screen rooms, state machines, and object pools from the `pixelroot32::gameplay` primitives. |
 | `pixelroot32-testing` | How to generate Unity framework unit tests using Mocks for isolated validation. |
-| `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, and `-fno-exceptions` enforcement. |
-| `pixelroot32-docs` | Doxygen documentation standards for the PixelRoot32 ecosystem. |
+| `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, `-fno-exceptions` enforcement, and Doxygen documentation standards. |
 
 ## 🛡️ Engine Constraints Enforced by these Skills
 
