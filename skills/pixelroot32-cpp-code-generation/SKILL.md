@@ -165,7 +165,7 @@ For subsystem-specific code generation, use the specialized skills:
 | Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected camera bounds |
 | Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
 
-For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`.
+For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`. For creating a new game project from scratch (PlatformIO scaffold, platform entry points, minimal scene), see `pixelroot32-game-scaffold`.
 
 ## Logging Integration
 

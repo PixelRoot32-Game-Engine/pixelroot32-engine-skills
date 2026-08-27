@@ -45,6 +45,7 @@ The suite is divided into specific engine subsystems. Your AI will dynamically l
 | `pixelroot32-gameplay-framework` | How to assemble grid-locked movement, screen-by-screen rooms, state machines, and object pools from the `pixelroot32::gameplay` primitives. |
 | `pixelroot32-testing` | How to generate Unity framework unit tests using Mocks for isolated validation. |
 | `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, `-fno-exceptions` enforcement, and Doxygen documentation standards. |
+| `pixelroot32-game-scaffold` | How to scaffold a new PlatformIO project: `platformio.ini`, base build flags, native/ESP32 platform entry points, and a minimal `Scene`. |
 
 ## 🛡️ Engine Constraints Enforced by these Skills
 
