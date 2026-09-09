@@ -9,6 +9,7 @@ metadata:
   module: particles
   feature_gate: PIXELROOT32_ENABLE_PARTICLES
   platform: cross-platform
+  engine_version: "1.9.0+unreleased"
 ---
 
 ## Overview
@@ -40,24 +41,26 @@ emitter.draw(renderer);
 
 ```cpp
 struct ParticleConfig {
-    Color startColor;       // Color at birth
-    Color endColor;         // Color at death (if fadeColor=true)
+    Color startColor;                  // Color at birth
+    Color endColor;                    // Color at death (if fadeColor=true)
 
-    Scalar minSpeed;        // Min initial speed
-    Scalar maxSpeed;        // Max initial speed
+    pixelroot32::math::Scalar minSpeed;      // Min initial speed
+    pixelroot32::math::Scalar maxSpeed;      // Max initial speed
 
-    Scalar gravity;         // Y-axis gravity per frame (+down, -up)
-    Scalar friction;        // Air resistance (0.0-1.0) applied to velocity
+    pixelroot32::math::Scalar gravity;       // Y-axis gravity per frame (+down, -up)
+    pixelroot32::math::Scalar friction;      // Air resistance (0.0-1.0) applied to velocity
 
-    uint8_t minLife;        // Min lifetime in frames
-    uint8_t maxLife;        // Max lifetime in frames
+    uint8_t minLife;                   // Min lifetime in frames
+    uint8_t maxLife;                   // Max lifetime in frames
 
-    bool fadeColor;         // Interpolate startColor → endColor over life
+    bool fadeColor;                    // Interpolate startColor → endColor over life
 
-    Scalar minAngleDeg;     // Min emission angle (0 = right)
-    Scalar maxAngleDeg;     // Max emission angle
+    pixelroot32::math::Scalar minAngleDeg;   // Min emission angle (0 = right)
+    pixelroot32::math::Scalar maxAngleDeg;   // Max emission angle
 };
 ```
+
+**No field is `float`.** The SIX `Scalar` fields — `minSpeed`, `maxSpeed`, `gravity`, `friction`, `minAngleDeg`, `maxAngleDeg` — MUST be assigned with `toScalar(...)`. `minLife`/`maxLife` are plain `uint8_t`, `fadeColor` is a plain `bool`, and the two color fields are plain `Color` values.
 
 ### Particle
 
@@ -65,8 +68,8 @@ struct ParticleConfig {
 
 ```cpp
 struct Particle {
-    Vector2 position;       // Current position
-    Vector2 velocity;       // Current velocity
+    math::Vector2 position; // Current position
+    math::Vector2 velocity; // Current velocity
 
     uint16_t color;         // Current color (RGB565)
     Color startColor;       // Initial color
@@ -78,6 +81,8 @@ struct Particle {
     bool active;            // Currently in use?
 };
 ```
+
+`Particle` has **no `Scalar` fields** — position and velocity are `math::Vector2`, life counters are `uint8_t`.
 
 ### ParticlePresets
 
@@ -129,17 +134,17 @@ Scene::update(dt):
 ### Custom particle config
 ```
 ParticleConfig conf;
-conf.startColor = Color::Cyan;
-conf.endColor = Color::Blue;
-conf.minSpeed = 1.0f;
-conf.maxSpeed = 3.0f;
-conf.gravity = -0.05f;     // Float upward
-conf.friction = 0.95f;
-conf.minLife = 15;
-conf.maxLife = 30;
-conf.fadeColor = true;
-conf.minAngleDeg = 45.0f;  // Cone spread
-conf.maxAngleDeg = 135.0f;
+conf.startColor = Color::Cyan;             // Color — plain value
+conf.endColor = Color::Blue;               // Color — plain value
+conf.minSpeed = toScalar(1.0f);            // Scalar
+conf.maxSpeed = toScalar(3.0f);            // Scalar
+conf.gravity = toScalar(-0.05f);           // Scalar — negative: float upward
+conf.friction = toScalar(0.95f);           // Scalar
+conf.minLife = 15;                         // uint8_t — plain value
+conf.maxLife = 30;                         // uint8_t — plain value
+conf.fadeColor = true;                     // bool — plain value
+conf.minAngleDeg = toScalar(45.0f);        // Scalar — cone spread
+conf.maxAngleDeg = toScalar(135.0f);       // Scalar
 
 ParticleEmitter magicEmitter({160, 120}, conf);
 magicEmitter.burst({160, 120}, 25);
@@ -147,7 +152,7 @@ magicEmitter.burst({160, 120}, 25);
 
 ## ESP32 Constraints
 
-- **MAX_PARTICLES_PER_EMITTER**: Fixed at 50. Use multiple emitters for more particles. Never change this in hot code.
+- **MAX_PARTICLES_PER_EMITTER**: a **preprocessor macro defined in `include/graphics/particles/ParticleEmitter.h`**, value **50** — it is NOT in `ParticleConfig.h` or `Particle.h`. Use multiple emitters for more particles. Never change this in hot code.
 - **No heap allocation**: `Particle particles[MAX_PARTICLES_PER_EMITTER]` is a fixed array inside the emitter. No runtime allocation.
 - **`uint16_t` for color**: Particles store color as packed RGB565 (not the `Color` enum). The `lerpColor()` function converts at interpolation time.
 - **Lifetime in frames**: `minLife`/`maxLife` are measured in frames (not seconds). At 60fps, 60 life = 1 second.
@@ -192,15 +197,15 @@ void Enemy::kill() {
 ParticleConfig snow;
 snow.startColor = Color::White;
 snow.endColor = Color::LightGray;
-snow.minSpeed = 0.5f;
-snow.maxSpeed = 2.0f;
-snow.gravity = 0.5f;
-snow.friction = 1.0f;    // No air resistance
-snow.minLife = 100;
-snow.maxLife = 200;
+snow.minSpeed = toScalar(0.5f);
+snow.maxSpeed = toScalar(2.0f);
+snow.gravity = toScalar(0.5f);
+snow.friction = toScalar(1.0f);   // No air resistance
+snow.minLife = 100;               // uint8_t
+snow.maxLife = 200;               // uint8_t
 snow.fadeColor = false;
-snow.minAngleDeg = 260; // Falling left
-snow.maxAngleDeg = 280; // Falling right
+snow.minAngleDeg = toScalar(260); // Falling left
+snow.maxAngleDeg = toScalar(280); // Falling right
 
 ParticleEmitter snowEmitter({120, -10}, snow);
 // In Scene::update:

@@ -9,6 +9,7 @@ metadata:
   module: core
   feature_gate: PIXELROOT32_ENABLE_AUDIO
   platform: cross-platform
+  engine_version: "1.9.0+unreleased"
 ---
 
 ## Overview
@@ -24,8 +25,20 @@ PixelRoot32 provides an NES-style audio subsystem with an 8-voice pool partition
 **Feature gate**: `PIXELROOT32_ENABLE_AUDIO`
 
 ```cpp
-AudioConfig config(backend, 22050);  // backend, sampleRate
-AudioEngine engine(config, caps);
+// struct AudioConfig { AudioBackend* backend = nullptr; int sampleRate = 22050;
+//                      int blockSize = platforms::config::HasFPU ? 256 : 128; };
+//   AudioConfig(AudioBackend* backend = nullptr, int sampleRate = 22050,
+//               int blockSize = platforms::config::HasFPU ? 256 : 128);
+// `backend` is a POINTER and may be nullptr for headless configs.
+// blockSize must be a multiple of 128 (static_assert, I2S alignment).
+AudioConfig config(&backend, 22050);  // pass the ADDRESS of the backend
+
+// Single constructor:
+//   AudioEngine(const AudioConfig& config,
+//               const platforms::PlatformCapabilities& caps = platforms::PlatformCapabilities());
+// Both forms are valid — `caps` is a defaulted parameter:
+//   AudioEngine engine(config);          // caps = PlatformCapabilities()
+AudioEngine engine(config, caps);         // explicit capabilities
 engine.init();
 
 // Re-sync the APU when the backend grants a different device rate
@@ -46,8 +59,13 @@ bool paused = engine.isMusicPaused();
 
 ### ApuCore (Synthesis)
 
-**Header**: `include/audio/ApuCore.h`
-**Namespace**: `pixelroot32::audio`
+**Header**: `<pixelroot32/apu/ApuCore.h>` (external library)
+**Legacy header**: `include/audio/ApuCore.h` — transitional re-export shim
+**Namespace**: `pixelroot32::audio` (unchanged across the boundary)
+
+Since engine **1.8.0** the APU core no longer lives in the engine: it was extracted to the external library `gperez88/PixelRoot32-APU` (`library.json` declares `"gperez88/PixelRoot32-APU": "^2.0.0"`). `include/audio/ApuCore.h` is now a re-export shim containing only `#pragma once` + `#include <pixelroot32/apu/ApuCore.h>`, so **existing `#include "audio/ApuCore.h"` keeps working unchanged**. NEW code should include `<pixelroot32/apu/ApuCore.h>` directly.
+
+The namespace, the class-scoped constants and `ApuCore::ProfileEntry` are unchanged — only the physical header location moved.
 
 ```cpp
 ApuCore apu;
@@ -57,7 +75,9 @@ apu.init(22050);  // sample rate
 ApuCore::MUSIC_VOICE_BASE;   // 0 — first sequencer track slot (trackIdx maps 1:1)
 ApuCore::MUSIC_VOICE_COUNT;  // 4 (= MAX_MUSIC_TRACKS)
 ApuCore::SFX_VOICE_BASE;     // 4 — first PLAY_EVENT / percussion slot
-ApuCore::SFX_VOICE_COUNT;    // 4
+ApuCore::SFX_VOICE_COUNT;    // 4 (= MAX_VOICES - SFX_VOICE_BASE)
+ApuCore::TICKS_PER_BEAT;     // 4
+ApuCore::PROFILE_RING_SIZE;  // 64
 
 // Command submission (thread-safe via SPSC queue)
 apu.submitCommand(cmd);
@@ -71,10 +91,43 @@ apu.isMusicPlaying();
 apu.isMusicPaused();
 
 // Profiling
+// struct ApuCore::ProfileEntry { uint64_t audioTimeSamples; float peak; bool clipped; };
 ApuCore::ProfileEntry stats[64];
 uint8_t count = 64;
 apu.getAndResetProfileStats(stats, count);
 ```
+
+### Engine-owned vs APU library headers
+
+Know which side of the 1.8.0 boundary a symbol lives on before including it.
+
+**Re-export shims in `include/audio/` (real definitions in `gperez88/PixelRoot32-APU@^2.0.0`)** — each is only a comment + `#pragma once` + one include:
+
+| Legacy shim | Re-exports |
+|---|---|
+| `include/audio/ApuCore.h` | `<pixelroot32/apu/ApuCore.h>` |
+| `include/audio/AudioCommandQueue.h` | `<pixelroot32/apu/AudioCommandQueue.h>` |
+| `include/audio/AudioMixerLUT.h` | `<pixelroot32/apu/AudioMixerLUT.h>` |
+| `include/audio/AudioMusicTypes.h` | `<pixelroot32/apu/AudioMusicTypes.h>` |
+| `include/audio/AudioOscLUT.h` | `<pixelroot32/apu/AudioOscLUT.h>` |
+| `include/audio/AudioTypes.h` | `<pixelroot32/apu/AudioTypes.h>` |
+
+**Still engine-owned in `include/audio/`**: `AudioBackend.h`, `AudioConfig.h`, `AudioEngine.h`, `AudioScheduler.h`, `DefaultAudioScheduler.h`, `MusicPlayer.h`, `SfxBankPlayback.h`.
+
+**Which side owns which type** — these four are all defined in the external `PixelRoot32-APU` library, *not* in the engine:
+
+| Type | Real definition | Reached through |
+|---|---|---|
+| `AudioEvent` | `PixelRoot32-APU/include/pixelroot32/apu/AudioTypes.h` | `<pixelroot32/apu/AudioTypes.h>` (shim: `audio/AudioTypes.h`) |
+| `SweepCurve` | `PixelRoot32-APU/include/pixelroot32/apu/AudioTypes.h` | same |
+| `SfxBreakpoint` | `PixelRoot32-APU/include/pixelroot32/apu/AudioTypes.h` | same |
+| `InstrumentPreset` | `PixelRoot32-APU` (`pixelroot32/apu/AudioMusicTypes.h`) | `<pixelroot32/apu/AudioMusicTypes.h>` (shim: `audio/AudioMusicTypes.h`) |
+
+All four keep namespace `pixelroot32::audio` on both sides of the boundary. `AudioEvent` is
+**forward-declared** against `struct InstrumentPreset` inside `AudioTypes.h` — the full preset
+definition comes from `AudioMusicTypes.h`.
+
+Old includes of the shim paths keep compiling unchanged; new code should include the `<pixelroot32/apu/...>` path directly. The namespace stays `pixelroot32::audio` on both sides.
 
 ### AudioScheduler (Abstract)
 
@@ -175,6 +228,35 @@ ImmediateSfxDelayScheduler now(engine);     // test/stub: ignores delays
 
 ## AudioEvent Parameters
 
+### Declaration Order (15 fields — authoritative)
+
+`struct AudioEvent` is defined in the external APU library at
+`PixelRoot32-APU/include/pixelroot32/apu/AudioTypes.h:720-771`, namespace `pixelroot32::audio`.
+Aggregate (brace) initialization follows this exact order:
+
+| # | Type | Field | Default |
+|---|------|-------|---------|
+| 1 | `WaveType` | `type` | *(none)* |
+| 2 | `float` | `frequency` | *(none)* |
+| 3 | `float` | `duration` | *(none)* — seconds |
+| 4 | `float` | `volume` | *(none)* — 0.0–1.0 |
+| 5 | `float` | `duty` | *(none)* — pulse only |
+| 6 | `uint8_t` | `noisePeriod` | `0` |
+| 7 | `const InstrumentPreset*` | `preset` | `nullptr` |
+| 8 | `float` | `sweepEndHz` | `0.0f` |
+| 9 | `float` | `sweepDurationSec` | `0.0f` |
+| 10 | `bool` | `loop` | `false` |
+| 11 | `SweepCurve` | `sweepCurve` | `SweepCurve::Linear` |
+| 12 | `const SfxBreakpoint*` | `dutySteps` | `nullptr` |
+| 13 | `uint8_t` | `dutyStepCount` | `0` |
+| 14 | `const SfxBreakpoint*` | `pitchEnvelope` | `nullptr` |
+| 15 | `uint8_t` | `pitchEnvelopeCount` | `0` |
+
+Only fields **1–5 have no default initializer** — a 5-element positional brace-init is the safe
+short form. `sweepCurve` sits at position 11 by design: its in-source comment reads *"additive at
+end of struct for brace-init safety"*, i.e. it was appended after the sweep fields so older
+brace-inits kept compiling.
+
 ```cpp
 AudioEvent event;
 event.type = WaveType::PULSE;
@@ -230,7 +312,8 @@ When `loop == false`, `duration <= 0` disables the voice immediately — it neve
 
 ## Instrument Presets
 
-**Header**: `include/audio/AudioMusicTypes.h`
+**Header**: `<pixelroot32/apu/AudioMusicTypes.h>` (external APU library; `include/audio/AudioMusicTypes.h` is the re-export shim)
+**Namespace**: `pixelroot32::audio`
 
 | Preset | Type | Duty | Use |
 |--------|------|------|-----|
@@ -334,6 +417,9 @@ Scene::update(dt):
 9. **Breakpoint tables dangle like presets**: `dutySteps` and `pitchEnvelope` are pointer+count — the tables must be `static`/`constexpr`, with non-decreasing `timeSec`.
 10. **SFX voice stealing is subpool-local**: Effects can only steal slots 4–7 (looped voices are reclaimed first). If 4 non-looping SFX are active, a new effect steals one of them — melodic music voices are never interrupted.
 11. **Sequencer track slots are fixed**: Track N always plays on voice slot N (0–3). `STOP_CHANNEL` with `channelIndex` 0–3 kills a music track's voice.
+12. **The APU is an external dependency**: since engine 1.8.0 the synthesis core ships as `gperez88/PixelRoot32-APU@^2.0.0`. A game's `platformio.ini` must resolve that dependency (`lib_deps`) or every `audio/ApuCore.h` shim include fails to compile.
+13. **`preset` is field 7, NOT the last field**: it sits between `noisePeriod` (6) and `sweepEndHz` (8). A positional brace-init that trails `preset` at the end — `{type, frequency, duration, volume, duty, &INSTR_X}` — silently assigns the preset pointer to `noisePeriod`'s slot (or fails to compile), and omitting `noisePeriod` while positionally initializing `preset` shifts every field after it. Both produce **silently wrong audio, not a build error**. Past `duty`, prefer named assignment (`event.preset = &INSTR_PULSE_BASS;`). The correct positional form is `{type, frequency, duration, volume, duty, 0, &INSTR_PULSE_BASS}`.
+14. **Field order is `frequency, duration, volume`** — not `frequency, volume, duration`. Swapping 3 and 4 compiles cleanly (both `float`) and yields a note of the wrong length at the wrong loudness.
 
 ## Common Patterns
 
