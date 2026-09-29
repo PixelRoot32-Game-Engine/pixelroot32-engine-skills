@@ -164,6 +164,7 @@ For subsystem-specific code generation, use the specialized skills:
 | Entities | `pixelroot32-entity-actor` | Actor types, lifecycle |
 | Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected camera bounds |
 | Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
+| Dialog | `pixelroot32-dialog` | Branching dialogue and choice menus: `DialogRunner` headless state machine, `DialogLine`/`DialogChoice` flash scripts, `DialogBox` panel, speaker portraits, selection caret |
 
 For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`. For creating a new game project from scratch (PlatformIO scaffold, platform entry points, minimal scene), see `pixelroot32-game-scaffold`.
 
