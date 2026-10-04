@@ -8,7 +8,7 @@ metadata:
   subsystem: physics
   module: collision
   feature_gate: PIXELROOT32_ENABLE_PHYSICS
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
   platform: cross-platform
 ---
 
@@ -42,10 +42,10 @@ physics.triggerCallbacks();     // Fire onCollision events
 // Configuration constants
 CollisionSystem::FIXED_DT;          // 1/60th second
 CollisionSystem::SLOP;              // 0.02f penetration slop
-CollisionSystem::VELOCITY_DAMPING;  // 0.999f
-CollisionSystem::MAX_VELOCITY;      // 500.0f units/s
 CollisionSystem::CCD_THRESHOLD;     // 3.0f (triggers CCD)
 ```
+
+`VELOCITY_DAMPING` / `MAX_VELOCITY` were removed in engine 1.12.0 — nothing ever read them. Per-body damping is `setFriction()` (`RigidActor::integrate`); rest state is `isAtRest()` with `RigidActor::kRestThreshold` (from `PHYSICS_REST_THRESHOLD`).
 
 ### Spatial Queries
 
@@ -145,12 +145,21 @@ DefaultLayers::kAll;    // 0xFFFF
 
 // Collision shapes
 Circle c = { toScalar(50), toScalar(50), toScalar(10) };
-Segment seg = { 0, 0, 100, 100 };
 
-// Intersection tests
+// Segment collider (ramps, cushions): a StaticActor with SEGMENT shape.
+// Endpoints are relative to position. Canonical example: RampActor in
+// examples/physics/src/PhysicsDemoScene.h.
+ramp.setShape(CollisionShape::SEGMENT);
+ramp.setSegment(a, b);   // Vector2 endpoints, position-relative
+
+// Intersection tests (plain Segment struct, intersects() only)
+Segment seg = { 0, 0, 100, 100 };
 bool hit = intersects(circleA, circleB);
 bool hit2 = intersects(circle, rect);
-bool hit3 = intersects(segment, rect);
+bool hit3 = intersects(seg, rect);
+
+// Contact-producing pairs: circle–circle, AABB–AABB, circle–AABB,
+// circle–segment, AABB–segment. SEGMENT–SEGMENT produces no contact.
 
 // CCD: sweep test
 // circleStart -> circleEnd against rect
@@ -364,7 +373,7 @@ Player::update(dt):
 - **Fixed16 math**: `Scalar` is `int32_t` (Q16.16) on no-FPU ESP32-C3. All physics math uses `toScalar()`/`toFloat()` wrappers. Never use raw `float` in hot physics paths.
 - **SpatialGrid is fully static**: `staticCells`, `dynamicCells` are static arrays sized at compile time via `PlatformConfig`. Grid capacity is fixed — cannot grow at runtime.
 - **Max entities**: Defined by `platforms::config::MaxEntities`. `TileCollisionBuilder` halves this for tile collision entities.
-- **CCD threshold**: `CCD_THRESHOLD = 3.0f` — bodies moving faster than 3 units/frame trigger sweep-based CCD. Tune via `setMaxVelocity()`.
+- **CCD threshold**: `CCD_THRESHOLD = 3.0f` — bodies moving faster than 3 units/frame trigger sweep-based CCD. It is a compile-time constant; slow a body with `setFriction()` and test rest with `isAtRest()` (`RigidActor::kRestThreshold`).
 - **Velocity iterations**: Configurable at compile time via `platforms::config::VelocityIterations`.
 - **Physics/grid limits**: `#ifndef` macros in `include/platforms/EngineConfig.h`, each mirrored under `pixelroot32::platforms::config::`. Defaults: `SPATIAL_GRID_CELL_SIZE` 32, `SPATIAL_GRID_MAX_ENTITIES_PER_CELL` 24, `SPATIAL_GRID_MAX_STATIC_PER_CELL` 12, `SPATIAL_GRID_MAX_DYNAMIC_PER_CELL` 12, `PHYSICS_MAX_ENTITIES` 64, `PHYSICS_MAX_CONTACTS` 128, `PHYSICS_MAX_PAIRS` 128 (alongside `MAX_ENTITIES` 64, `MAX_SCENES` 8, `MAX_LAYERS` 4).
 - **ESP32 lowers exactly four**: `[base_esp32]` in `platformio.ini` overrides `SPATIAL_GRID_MAX_STATIC_PER_CELL` → 4, `SPATIAL_GRID_MAX_DYNAMIC_PER_CELL` → 4, `PHYSICS_MAX_CONTACTS` → 64, `PHYSICS_MAX_PAIRS` → 64. Every other limit keeps its default on ESP32.
@@ -391,6 +400,7 @@ Player::update(dt):
 18. **`TilePixelCollision.h` has no feature flag**: unlike every neighbouring physics addition, it is unconditionally compiled. There is no `PIXELROOT32_ENABLE_*` macro to guard calls with — do not invent one.
 19. **`erodePx` erodes the tile, not the body**: erosion shrinks the *tile's* solid silhouette. It is per-tile only, so a multi-tile wall erodes at every tile seam. Cost is `(2k+1)^2` lookups per query at `erodePx = k`.
 20. **The caller owns the multi-hit counter**: `applyHit` only decrements the `remainingHits` out-param. The engine stores no per-tile hit state and never calls `consumeTile()` for you — do that yourself when `remainingHits` hits 0.
+21. **Capacity limits drop silently in release**: bodies past `PHYSICS_MAX_ENTITIES`, contacts past `PHYSICS_MAX_CONTACTS`, candidate truncations at `PHYSICS_MAX_CANDIDATES_PER_BODY`, and grid inserts past the per-cell caps are discarded with no warning — those collisions are missed. Debug builds (`PIXELROOT32_DEBUG_MODE` only) count every drop: `CollisionSystem::getDroppedEntityCount()` / `getDroppedContactCount()` / `getDroppedCandidateCount()` and `SpatialGrid::getDroppedStaticInserts()` / `getDroppedDynamicInserts()` (reset with `SpatialGrid::resetLimitDropCounters()`).
 
 ## Common Patterns
 
