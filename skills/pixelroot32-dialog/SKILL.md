@@ -9,7 +9,7 @@ metadata:
   module: dialog
   feature_gate: PIXELROOT32_ENABLE_DIALOG
   platform: cross-platform
-  engine_version: "1.11.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
