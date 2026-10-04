@@ -7,7 +7,7 @@ metadata:
   domain: engine
   subsystem: core
   module: entity-actor
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
   platform: cross-platform
 ---
 
@@ -112,6 +112,7 @@ actor.setMass(2.0f);
 actor.setGravityScale(toScalar(1.0f));
 actor.setRestitution(toScalar(0.5f));    // Bounciness
 actor.setFriction(toScalar(0.1f));
+bool resting = actor.isAtRest();         // true once velocity reaches exactly zero
 
 // World bounds
 actor.setWorldBounds(240, 240);
@@ -121,6 +122,8 @@ WorldCollisionInfo info = actor.getWorldCollisionInfo();
 // Collision shape
 actor.setShape(CollisionShape::CIRCLE);
 actor.setRadius(toScalar(8.0f));         // Auto-sets width/height
+actor.setShape(CollisionShape::SEGMENT); // Static ramp/cushion — see pixelroot32-physics
+actor.setSegment(a, b);                  // position-relative endpoints
 
 // Flags
 actor.setSensor(true);                   // Trigger (events only)
@@ -149,7 +152,8 @@ void* data = actor.getUserData();
 | `STATIC` | No | No | No | Blocks others |
 | `KINEMATIC` | No | No | Via `setVelocity` | Stops at obstacles |
 | `RIGID` | Yes | Yes | Yes | Full physics simulation |
-| Sensor flag | No | No | Yes | Events only, no response |
+
+Sensor is not a body type — it is a flag (`setSensor(true)`, `physicsFlags & 0x01`): events only, no response.
 
 **Note**: `PhysicsBodyType::KINEMATIC` is a body-type flag on `PhysicsActor`. For character controllers with slide/snap, use the **`KinematicActor` subclass** instead.
 
@@ -159,16 +163,19 @@ void* data = actor.getUserData();
 |-------|-----|-------|
 | `AABB` | Default | Axis-Aligned Bounding Box |
 | `CIRCLE` | Circular bodies | Set radius; auto-sets width/height to diameter |
+| `SEGMENT` | Static ramps/cushions | `setSegment(a, b)` with position-relative endpoints; contacts vs circle and AABB only — see **`pixelroot32-physics`** |
 
 ### Log
 
 **Header**: `include/core/Log.h`
-**Namespace**: `pixelroot32::core`
+**Namespace**: `pixelroot32::core::logging`
 
 ```cpp
-PIXELROOT32_LOG("Player position: %d, %d", (int)pos.x, (int)pos.y);
-PIXELROOT32_LOG_ERROR("Entity not found: %d", entityId);
+logging::log("Player position: %d, %d", (int)pos.x, (int)pos.y);
+logging::log(logging::LogLevel::Error, "Entity not found: %d", entityId);
 ```
+
+Debug builds only (`PIXELROOT32_DEBUG_MODE`) — release builds compile to no-ops. There are no `PIXELROOT32_LOG` macros.
 
 ## Composition Patterns
 
@@ -215,7 +222,7 @@ class TriggerZone : public PhysicsActor {
 
 ## Gotchas
 
-1. **Previous position sync**: When setting position manually, call `setPosition(Vector2)` (not `position = ...`) to sync `previousPosition` for crossing detection.
+1. **Previous position sync** (`PhysicsActor` only): When setting position manually, call `setPosition(Vector2)` (not `position = ...`) to sync `previousPosition` for crossing detection. Plain `Entity` has neither member.
 2. **World collision reset**: `resetWorldCollisionInfo()` must be called at the start of each frame (done automatically by PhysicsActor::update()).
 3. **Sensor actors**: `isPhysicsBody()` returns `true` for all PhysicsActors, even sensors. Distinguish via `isSensor()`.
 4. **One-way platforms**: Only block from one direction (above → below pass-through). Use `setOneWay(true)` on static bodies.

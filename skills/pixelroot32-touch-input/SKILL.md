@@ -8,7 +8,7 @@ metadata:
   subsystem: input
   module: touch
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -234,7 +234,7 @@ uint8_t pointCount = touchMgr.getTouchCount();
 
 ## Feature Gate
 
-`PIXELROOT32_ENABLE_TOUCH` — **default `0`** (`include/platforms/EngineConfig.h:104-106`).
+`PIXELROOT32_ENABLE_TOUCH` — **default `0`** (`include/platforms/EngineConfig.h:104-105`).
 
 **This flag gates `Engine` ONLY.** It is not a whole-subsystem switch, which is why this skill deliberately carries **no `feature_gate` key in its metadata**: a blanket gate declaration would be misleading, since most of the touch pipeline compiles regardless of the flag.
 
@@ -242,9 +242,9 @@ uint8_t pointCount = touchMgr.getTouchCount();
 
 | Location | What disappears |
 | --- | --- |
-| `include/core/Engine.h:22-25` | the three touch includes |
-| `include/core/Engine.h:176` / `:184` | `getTouchDispatcher()` |
-| `include/core/Engine.h:276-282` | `touchDispatcher`, `touchManager`, `wasTouchActive`, `lastTouchX`, `lastTouchY` |
+| `include/core/Engine.h:22-24` | the three touch includes |
+| `include/core/Engine.h:197` | `getTouchDispatcher()` |
+| `include/core/Engine.h:290-294` | `touchDispatcher`, `touchManager`, `wasTouchActive`, `lastTouchX`, `lastTouchY` |
 | `src/core/Engine.cpp` | the per-frame touch polling |
 
 **Still compiled when the flag is 0** — untouched by it:
@@ -316,10 +316,12 @@ Engine::runFrame():
 5. **Double-click detection**: Uses per-touch-ID last-click tracking (position + timestamp). Only fires if within 400ms and 10px of previous click.
 6. **Long press fires once**: `longPressFired` flag prevents repeated long-press events for a single press-and-hold.
 7. **Timestamps must be monotonic**: `TouchEventDispatcher` assumes monotonically increasing timestamps per touch ID.
-8. **Adapter-specific calibration**: XPT2046 may need rotation/flip mapping (configurable in adapter init). GT911 typically provides pre-calibrated coordinates.
+8. **Adapter-specific calibration**: XPT2046 may need rotation/flip mapping (configurable in adapter init). GT911 typically provides pre-calibrated coordinates. Bounds are post-rotation effective pixels — under `DISPLAY_ROTATION` 1/3 the engine swaps dimensions centrally (`DisplayConfig::applyRotationNormalization()`), so validate against the rotated size, not the physical one.
+9. **Shared SPI bus**: an XPT2046 (or any second SPI device) sharing the TFT bus must call `TFT_eSPI_Drawer::waitForPendingDMA()` before touching SPI — the deferred-DMA tail stays in flight between frames.
 9. **`PIXELROOT32_ENABLE_TOUCH=0` compiles but does not poll**: reading touch through `InputManager::getTouchEvents()` **compiles and links** with the flag off — the dispatcher member is unconditional — but `Engine` is not polling the hardware, so the queue stays empty forever. The symptom is a silent dead control scheme, not a build error. A game that relies on `Engine`'s touch pipeline MUST set `-D PIXELROOT32_ENABLE_TOUCH=1`; the default is `0`.
 10. **The flag is not the driver selector**: setting `PIXELROOT32_ENABLE_TOUCH=1` without a `TOUCH_DRIVER_*` define still gives you no hardware. Driver choice is `TOUCH_DRIVER_XPT2046` / `TOUCH_DRIVER_GT911` / `PLATFORM_NATIVE`, decided separately.
 11. **Do NOT `#if`-guard `TouchEventDispatcher` or `TouchManager` uses**: neither header is gated by `PIXELROOT32_ENABLE_TOUCH`. Guarding them mirrors `Engine`'s gate onto code that does not have it. Guard only `Engine::getTouchDispatcher()` call sites.
+12. **Touch-to-cell picking floors, never clamps**: `screenToCellX/Y` floor toward −inf — one pixel outside the map returns the outside cell, never (0,0). Range-check yourself (see **`pixelroot32-projection`**).
 
 ## Common Patterns
 

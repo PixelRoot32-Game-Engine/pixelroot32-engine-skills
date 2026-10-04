@@ -9,7 +9,7 @@ metadata:
   module: core
   feature_gate: PIXELROOT32_ENABLE_AUDIO
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -141,6 +141,7 @@ class MyScheduler : public AudioScheduler {
     void submitCommand(const AudioCommand& cmd) override;
     void start() override;
     void stop() override;
+    bool isIndependent() const override;   // pure virtual — the snippet does not compile without it
     void generateSamples(int16_t* stream, int length) override;
     ApuCore& getApuCore() override;
 };
@@ -173,7 +174,7 @@ player.setBPM(180.0f);
 **Namespace**: `pixelroot32::audio`
 
 ```cpp
-AudioCommandQueue queue;  // Capacity: 128 (configurable via AUDIO_COMMAND_QUEUE_CAPACITY)
+AudioCommandQueue queue;  // Capacity: 128 entries (~8 KB at default capacity; configurable via AUDIO_COMMAND_QUEUE_CAPACITY)
 
 // Producer (game thread)
 queue.enqueue(cmd);  // Returns false if full
@@ -221,7 +222,7 @@ ImmediateSfxDelayScheduler now(engine);     // test/stub: ignores delays
 | Wave | Enum | Characteristics |
 |------|------|-----------------|
 | **Pulse** | `WaveType::PULSE` | Variable duty cycle (12.5%, 25%, 50%, 75%), duty sweep |
-| **Triangle** | `WaveType::TRIANGLE` | Smooth, softer timbre — good for bass, pads, leads |
+| **Triangle** | `WaveType::TRIANGLE` | Smooth, softer timbre — good for bass, pads, leads. Quantized to 4-bit NES levels by default (`voice.triangleQuantize4Bit = false` to opt out) |
 | **Noise** | `WaveType::NOISE` | 15-bit LFSR, short/long mode (93 or 32767-step) |
 | **Sine** | `WaveType::SINE` | Band-limited sine via LUT — pure tone |
 | **Saw** | `WaveType::SAW` | Polyphonic saw from linear phase ramp — rich harmonics |
@@ -397,10 +398,10 @@ Scene::update(dt):
 
 ## ESP32 Constraints
 
-- **No FPU (ESP32-C3 RISC-V)**: Use Q15 fixed-point path — `EnvelopeState`, `LfoState`, `AudioChannel` have Q15/Q32 mirrors for all hot-path math.
+- **No FPU (ESP32-C3 RISC-V)**: Use Q15 fixed-point path — `EnvelopeState`, `LfoState`, `AudioChannel` have Q15/Q32 mirrors for all hot-path math. The integer/Q15 render path is ~4.4 dB louder than the float path — rebalance volumes when moving between FPU and no-FPU targets.
 - **IRAM_ATTR**: Mark `generateSamples()` and hot synthesis functions with `IRAM_ATTR` when using I2S DMA to avoid flash contention.
 - **Block size**: 128 samples for no-FPU platforms (`platforms::config::HasFPU` controls default).
-- **SPSC queue**: `AudioCommandQueue` capacity defaults to 128 (512 bytes). Increase via `AUDIO_COMMAND_QUEUE_CAPACITY` for high-throughput.
+- **SPSC queue**: `AudioCommandQueue` capacity defaults to 128 entries (~8 KB). Increase via `AUDIO_COMMAND_QUEUE_CAPACITY` for high-throughput.
 - **Sequencer note limit**: Default 32 notes/frame. Set via `setSequencerNoteLimit()` or `AUDIO_SEQUENCER_MAX_NOTES` to prevent audio starvation.
 - **Blocking**: Never allocate or block in `generateSamples()`. All synthesis is pre-computed.
 
@@ -408,7 +409,7 @@ Scene::update(dt):
 
 1. **Preset pointers must outlive usage**: `AudioEvent::preset`, `MusicNote::preset`, and `MusicTrack::notes` must point to `static` or `constexpr` data — stack-local temporaries will dangle.
 2. **SPSC queue drops**: When the queue is full, the *newest* command is dropped (not the oldest). Monitor `getDroppedCommands()` for backpressure.
-3. **Noise channel**: `frequency` sets the LFSR clock rate, not pitch. Shorter `noisePeriod` → lower pitch. `noiseShortMode=true` gives a metallic 93-step LFSR.
+3. **Noise channel**: `frequency` sets the LFSR clock rate, not pitch. Shorter `noisePeriod` → lower pitch. `noiseLfsrShort=true` gives a metallic 93-step LFSR (`noiseShortMode` is its deprecated alias).
 4. **Block size alignment**: Must be a multiple of 128 for I2S DMA alignment (compile-time assertion).
 5. **Bitcrush**: `setMasterBitcrush(bits)` with bits 0 disables the effect. Values 1-15 re-quantize the final int16 output.
 6. **MusicTrack lifetime**: The `MusicTrack` and its `MusicNote` array must remain in scope for the duration of playback — the sequencer references them by pointer.

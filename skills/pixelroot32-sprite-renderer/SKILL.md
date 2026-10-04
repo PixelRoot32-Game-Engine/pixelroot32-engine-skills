@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: renderer
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
   # No `feature_gate` key: the renderer subsystem itself is always compiled.
   # The optional sub-features it hosts are gated individually and documented in
   # the body: PIXELROOT32_ENABLE_DIRTY_REGIONS,
@@ -89,6 +89,12 @@ renderer.drawFilledCircle(50, 50, 20, Color::Green);
 renderer.drawBitmap(0, 0, 240, 240, bitmap, Color::White);
 ```
 
+**Blit fast paths.** 2bpp/4bpp blits pack the palette LUT **once per sprite** (not per
+pixel) — the inner loop is a table read. A pixel naming an index past the sprite's
+`paletteSize` resolves to **black** (LUT tails are zeroed). 1bpp sprites write the 8bpp
+framebuffer directly (~4–8 cycles per set pixel); surfaces without an 8bpp buffer
+(U8g2, SDL2, mocks) fall back to the virtual `drawPixel()` path.
+
 ### Tilemaps
 
 `TileMap` / `TileMap2bpp` / `TileMap4bpp` are aliases of `TileMapGeneric<T>`
@@ -140,7 +146,7 @@ map.cleanupRuntimeMask();         // Manual cleanup
 multi-palette tilemaps. Array size is `width * height`, one byte per cell:
 **bits 0-2 are the palette slot (0..7); bits 3-7 are reserved.** Extract with
 `kTileCellPaletteMask`, which is a **namespace-scope constant, not a struct
-member** (`Renderer.h:87-89`, value **`0x07`**); its sprite-side sibling is
+member** (`Renderer.h:89`, value **`0x07`**); its sprite-side sibling is
 `kSpritePaletteMask = 0x07` (`:92`).
 
 ```cpp
@@ -180,6 +186,13 @@ renderer.drawText("Hello", 10, 10, Color::Cyan, 2, &myFont);
 // Centered
 renderer.drawTextCentered("GAME OVER", 120, Color::Red, 3);
 ```
+
+`textWidth()` and `drawTextCentered()` measure **per glyph** through the same decoder
+`drawText` uses — never per byte, so UTF-8 accented strings measure exactly what they draw.
+Accented Latin-1 needs `PIXELROOT32_ENABLE_FONT_LATIN1` (default `0`): `Font` appends an
+`extGlyphs`/`extFirstChar`/`extLastChar`/`extYOffset` block (existing 7-value initializers
+keep compiling). `FontManager::getGlyphIndex()` returns `uint16_t` with `kNoGlyph`
+(`0xFFFF`) for "not found" — the old `255` sentinel was itself a legal glyph index.
 
 ### Dirty Regions
 
@@ -222,7 +235,9 @@ frame, and they assume a `present()` will follow. A scene reporting
 bus stays claimed and every other device on it is locked out. The Engine calls
 `flushPendingTransfers()` on exactly the frames it skips presenting.
 `TFT_eSPI_Drawer` overrides it with `waitForPendingDMA()`. A driver with nothing
-pending correctly inherits the no-op.
+pending correctly inherits the no-op. **Shared-bus rule: any code touching SPI, the TFT,
+or the DMA line buffers calls `waitForPendingDMA()` first** — the engine already wires it
+for the touch bridge, `freeScalingBuffers()`, destructor, `init()` and `setRotation()`.
 
 ### Static Tilemap Cache
 
@@ -326,8 +341,8 @@ Contracts:
 - **Over-approximation** (`:20-25`): only leading and trailing transparent runs are
   skipped. Interior transparent pixels inside `[rowMinX, rowMaxX)` are still iterated.
 - A fully transparent row yields `{ minX = 0, maxX = 0 }` (`:27-30`).
-- **`flipX` bypasses the span limits entirely** — `src/graphics/Renderer.cpp:740-750`
-  (4bpp) and `:630-636` (2bpp): the mirrored layout invalidates the precomputed
+- **`flipX` bypasses the span limits entirely** — `src/graphics/Renderer.cpp:747-758`
+  (4bpp) and `:638` (2bpp): the mirrored layout invalidates the precomputed
   min/max, so a flipped draw walks the full bounding box. Never budget a
   performance win for flipped sprites.
 
@@ -339,7 +354,7 @@ spr.rowMaxX = maxX;                       // <-- and this
 ```
 
 **ESP32**: sprite structs are usually flash-resident and cannot be mutated in place.
-`examples/iso_dungeon/src/IsoDungeonScene.cpp:60-78` uses `const_cast` and gates the
+`graphics/iso_dungeon/src/IsoDungeonScene.cpp` (in PixelRoot32-Demo-Projects) uses `const_cast` and gates the
 wiring for ESP32 (documented at `SpanTable.h:37-43`). Copy the sprite struct into RAM
 or follow that gating pattern; do not assign `rowMinX`/`rowMaxX` on a flash object.
 
@@ -349,7 +364,7 @@ or follow that gating pattern; do not assign `rowMinX`/`rowMaxX` on a flash obje
 **Namespace**: `pixelroot32::graphics`
 **Feature gate**: the header itself has **none** — it is deliberately platform-neutral
 so native tests can verify it. The *driver path* is gated by
-`PIXELROOT32_TFT_12BIT_COLOR` (default **0**, `PlatformDefaults.h:244-246`, defined
+`PIXELROOT32_TFT_12BIT_COLOR` (default **0**, `PlatformDefaults.h:266-268`, defined
 **nested inside** `#if defined(PIXELROOT32_USE_TFT_ESPI_DRIVER)`).
 
 ```cpp
@@ -450,7 +465,7 @@ renderer.setSpritePaletteSlotContext(0xFF);  // Disable context
 - **Dirty regions**: 8×8 cell grid reduces per-frame clear cost. Static layers (`LayerType::Static`) suppress per-cell dirty marking.
 - **StaticTilemapLayerCache**: Pre-allocate during `Scene::init()` — avoid heap allocation in game loop.
 - **StaticLayerSnapshot**: one full logical framebuffer of heap — **57,600 B at 240×240**. Allocate in `Scene::init()`; a failed re-allocation discards the captured contents.
-- **Span tables**: the `uint8_t[height]` arrays are caller-owned and must outlive every draw. Flash-resident sprite structs cannot be mutated in place on ESP32 — see the `const_cast` gating in `examples/iso_dungeon`.
+- **Span tables**: the `uint8_t[height]` arrays are caller-owned and must outlive every draw. Flash-resident sprite structs cannot be mutated in place on ESP32 — see the `const_cast` gating in `graphics/iso_dungeon` (PixelRoot32-Demo-Projects).
 - **No `std::function`**: Callbacks use raw function pointers (`UIElementVoidCallback`).
 
 ## Gotchas

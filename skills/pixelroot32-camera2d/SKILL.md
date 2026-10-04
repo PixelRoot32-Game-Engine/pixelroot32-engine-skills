@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: camera2d
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
   # No single feature_gate: the subsystem is only partially gated. Camera2D is
   # always compiled; CameraEffectsSystem is behind PIXELROOT32_ENABLE_CAMERA_EFFECTS
   # and CameraTween behind PIXELROOT32_ENABLE_CAMERA_TWEEN. Each Key API entry
@@ -92,7 +92,11 @@ class CameraTween {
 
 - `from` / `to` are `math::Vector2` **by value**; durations are `uint16_t` ms; slot
   ids are `uint8_t`. **No parameter is `math::Scalar`.**
-- `startTween` returns a slot id, or `kInvalidSlotId` (`0xFF`) when no slot is free.
+- `startTween` runs ONE segment (`from` → `to`). Waypoint paths chain segments:
+  start the next leg when `isComplete(slotId)` turns true.
+- `startTween` returns a slot id, or `kInvalidSlotId` (`0xFF`) when no slot is free
+  — including `durationMs == 0` (instant no-op, consumes no slot) and `N == 0`.
+- Easing interpolates in Q16.16 integer math — zero float on the Fixed16 path.
 - With `N = 0`, `startTween` always returns `kInvalidSlotId` and `activeCount()` is
   always 0.
 

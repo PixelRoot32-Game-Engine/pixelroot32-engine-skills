@@ -9,12 +9,12 @@ metadata:
   module: ui
   feature_gate: PIXELROOT32_ENABLE_UI_SYSTEM
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
 
-PixelRoot32's UI system provides entity-based UI elements with touch input support. `UIElement` inherits from `Entity` and integrates with the scene graph. Layouts (`UIAnchorLayout`, `UIGridLayout`, `UIHorizontalLayout`, `UIVerticalLayout`) automate positioning. Touch widgets (`UITouchButton`, `UITouchCheckbox`, `UITouchSlider`) provide interactive controls driven by `UIManager`, which routes touch events, manages hover/pressed/captured states, and maintains consumed-event flags. Sprite widgets (`UISprite`, `UISpriteRow`) added in 1.9.0 render flash-resident sprite art as UI, backed by the non-owning `UISpriteRef` handle.
+PixelRoot32's UI system provides entity-based UI elements with touch input support. `UIElement` inherits from `Entity` and integrates with the scene graph. Layouts (`UIAnchorLayout`, `UIGridLayout`, `UIHorizontalLayout`, `UIVerticalLayout`) automate positioning. Touch widgets (`UITouchButton`, `UITouchCheckbox`, `UITouchSlider`) provide interactive controls driven by `UIManager`, which routes touch events, manages hover/pressed/captured states, and maintains consumed-event flags. Sprite widgets (`UISprite`, `UISpriteRow`) since 1.9.0 render flash-resident sprite art as UI, backed by the non-owning `UISpriteRef` handle.
 
 **See also**: `pixelroot32-touch-input` for the event pipeline feeding `UIManager::processEvents`; `pixelroot32-gameplay-framework` for the game state a HUD (`UILabel`, `UISpriteRow`) renders; `pixelroot32-projection` for converting world coordinates to the screen space that fixed-position UI lives in.
 
@@ -82,7 +82,7 @@ UIElement element(position, width, height, type);
 UIElement element(x, y, w, h, UIElementType::GENERIC);
 
 // Types
-enum UIElementType { GENERIC, BUTTON, LABEL, CHECKBOX, LAYOUT };
+enum class UIElementType { GENERIC, BUTTON, LABEL, CHECKBOX, LAYOUT };  // scoped — UIElementType::GENERIC
 
 // Callback typedefs — raw function pointers, no std::function (memory efficiency)
 using UIElementVoidCallback = void(*)();
@@ -329,10 +329,10 @@ explicit UITouchSlider(int16_t x, int16_t y, uint16_t w, uint16_t h, uint8_t ini
 
 UITouchSlider slider(10, 100, 200, 16, 75);   // initialValue in [MIN_VALUE, MAX_VALUE]
 
-// Callbacks — void setOnValueChanged(SliderCallback);  there is NO setOnChange()
-void setOnValueChanged(SliderCallback callback);   // :80  void(*)(uint8_t)
-void setOnDragStart(UIElementVoidCallback);        // :86
-void setOnDragEnd(UIElementVoidCallback);          // :92
+// Callbacks — all three take SliderCallback (void(*)(uint8_t)); there is NO setOnChange()
+void setOnValueChanged(SliderCallback callback);   // :80
+void setOnDragStart(SliderCallback callback);      // :86
+void setOnDragEnd(SliderCallback callback);        // :92
 
 // Value access
 uint8_t getValue() const;            // :134
@@ -352,7 +352,7 @@ UIPanel panel({50, 50}, {140, 140});
 // Container widget with background rendering
 ```
 
-### UISpriteRef (new in 1.9.0)
+### UISpriteRef (since 1.9.0)
 
 **Header**: `include/graphics/ui/UISpriteRef.h`
 **Namespace**: `pixelroot32::graphics::ui`
@@ -386,7 +386,7 @@ void drawUISpriteRef(Renderer& renderer, const UISpriteRef& ref,
 
 **Ownership** (`:31-32`): a `UISpriteRef` **never owns** the sprite. Sprites are `constexpr`/flash-resident asset data that outlives any UI element pointing at it.
 
-### UISprite (new in 1.9.0)
+### UISprite (since 1.9.0)
 
 **Header**: `include/graphics/ui/UISprite.h`
 **Namespace**: `pixelroot32::graphics::ui`
@@ -418,7 +418,7 @@ void update(unsigned long deltaTime) override;   // :114 — documented no-op
 void draw(Renderer& renderer) override;          // :120
 ```
 
-### UISpriteRow (new in 1.9.0)
+### UISpriteRow (since 1.9.0)
 
 **Header**: `include/graphics/ui/UISpriteRow.h`
 **Namespace**: `pixelroot32::graphics::ui`
@@ -520,7 +520,7 @@ class GameHUD {
 - **No std::function**: Callbacks use raw C function pointers (`void(*)()`, `void(*)(bool)`, `void(*)(uint8_t)` for sliders).
 - **Layouts are the documented exception to the zero-allocation rule**: `UILayout` stores children in `std::vector<UIElement*>` (and `UIAnchorLayout` in a second `std::vector<std::pair<UIElement*, Anchor>>`). That storage is heap-backed and **unbounded** — there is no max-children constant. Build the whole layout tree once during `Scene::init()`/`initUI()`, and NEVER add or remove layout children inside `update()`/`draw()`. The element objects themselves are still scene-owned; the vector only holds pointers.
 - **Sprite widgets are allocation-free**: `UISpriteRef` is a POD aggregate holding a pointer union — it copies by value and never allocates. `UISpriteRow` is bounded by `static constexpr int kMaxStates = 5;` state slots, so its art table is fixed-size. Sprite pixel data stays in flash (`constexpr`), never copied to RAM.
-- **Feature gate**: Entire UI system is gated by `PIXELROOT32_ENABLE_UI_SYSTEM`. All UI headers must be guarded with `#if`. The 1.9.0 sprite widgets declare **no stub classes** — with the flag off the declarations vanish entirely, so guard call sites too.
+- **Feature gate**: Entire UI system is gated by `PIXELROOT32_ENABLE_UI_SYSTEM`. All UI headers must be guarded with `#if`. The sprite widgets declare **no stub classes** — with the flag off the declarations vanish entirely, so guard call sites too. `DialogBox` is deliberately **not** a `UIElement`: dialog UI works with the UI system off.
 - **UIManager in Scene**: `UIManager` is a member of `Scene`. Only available when the feature gate is enabled.
 
 ## Gotchas

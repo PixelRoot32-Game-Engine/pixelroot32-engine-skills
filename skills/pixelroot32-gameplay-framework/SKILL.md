@@ -8,17 +8,17 @@ metadata:
   subsystem: gameplay
   module: gameplay-framework
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
 
-`pixelroot32::gameplay` is a family of independent, zero-heap, opt-in primitives shipped in
-engine 1.9.0. Composition, not inheritance: none adds a virtual or a member to `Entity`/`Actor`,
+`pixelroot32::gameplay` is a family of independent, zero-heap, opt-in primitives.
+Composition, not inheritance: none adds a virtual or a member to `Entity`/`Actor`,
 and only `RoomGraph` and `InteractionTracker` have engine-side wiring. This is where the
-engine's **top-down** story lives — `examples/bomberbot`, `examples/2048`,
-`examples/legend_of_clone`, `examples/room_screen` and `examples/midway_clone` are built from
-these pieces.
+engine's **top-down** story lives — `games/bomberbot`, `games/2048`,
+`games/legend_of_clone` (in PixelRoot32-Demo-Projects), `gameplay/room_screen` and
+`games/midway_clone` are built from these pieces.
 
 **Every flag in this family defaults to `0`.** Code using `GridSpec`, `GridMotion`,
 `StateMachine`, `ObjectPool`, `RoomGraph` or `GameplayEventBus` without the matching
@@ -114,7 +114,7 @@ public:
 `kMaxChainedTransitions` is **private** (`StateMachine.h:158`, value `8`) — game code observes
 overflow only through `getTransitionOverflowCount()`. The table must outlive the machine; the
 convention is a class-static `const` array in flash, configured once
-(`examples/metroidvania/src/PlayerActor.cpp:56`, `:69`):
+(`gameplay/metroidvania/src/PlayerActor.cpp:56`, `:69` in PixelRoot32-Demo-Projects):
 `stateMachine.configure(this, kPlayerStates, 4); stateMachine.start(kIdleId);`
 
 ### ObjectPool — fixed-capacity placement-new slots
@@ -171,7 +171,7 @@ public:
 };
 ```
 
-One instance, owned by `Engine`: `engine.getGameplayEventBus()` (`include/core/Engine.h:266`).
+One instance, owned by `Engine`: `engine.getGameplayEventBus()` (`include/core/Engine.h:279`).
 `SceneManager` drains it on every `SceneSwap`, but **not** on `pushScene()`/`popScene()`.
 Non-atomic — publishing from an ISR or the audio task is unsupported and corrupts the ring.
 
@@ -202,7 +202,7 @@ public:
     void reset();
 };
 
-collisionSystem.setInteractionTracker(&tracker_);   // include/physics/CollisionSystem.h:131
+collisionSystem.setInteractionTracker(&tracker_);   // include/physics/CollisionSystem.h:117
 tracker_.registerActor(&door_, &door_.interaction); // AFTER addEntity assigned entityId
 ```
 
@@ -221,8 +221,9 @@ inline bool compareByDepthKey(core::Entity* a, core::Entity* b);
 
 `compareByBottomY` orders by `position.y + math::toScalar(height)` — the **top-down default**.
 The `Scene` members it plugs into (`depthComparator`, `depthSortEnabled`, `Scene.h:277-280`)
-are themselves behind `PIXELROOT32_ENABLE_DEPTH_SORT`, so the assignment needs the flag even
-though the function does not. `compareByDepthKey` belongs to **`pixelroot32-projection`**.
+always compile (no flag guard) — only `Entity::depthKey` and `compareByDepthKey` need
+`PIXELROOT32_ENABLE_DEPTH_SORT`. `compareByDepthKey` is defined here (`DepthCompare.h`);
+the keys it orders are computed per **`pixelroot32-projection`**.
 
 ### RoomGraph / RoomLayout — screen-by-screen rooms
 
@@ -296,6 +297,7 @@ Prefix every name below with `PIXELROOT32_ENABLE_`.
 | `..._GAMEPLAY_OBJECT_POOL` (`:122`) | `ObjectPool<T,N>` | `0` | `config::EnableGameplayObjectPool` |
 | `..._GAMEPLAY_GRID_SPACE` (`:126`) | `GridSpec` **and** `GridMotion` | `0` | `config::EnableGameplayGridSpace` |
 | `..._GAMEPLAY_ROOM` (`:130`) | `RoomGraph<N>`, `RoomLayout`, `Scene::onRoomEnter`/`setRoomGraph` | `0` | `config::EnableGameplayRoom` |
+| `PIXELROOT32_ENABLE_DIALOG` (`:156`) | `DialogTypes`, `DialogRunner`, `DialogBox` — owned by **`pixelroot32-dialog`** | `0` | `config::EnableDialog` |
 | `..._PROJECTION` (`:142`) | `ProjectionSpec` + the `interpolatedWorld` overload | `0` | `config::EnableProjection` |
 
 Two **require `PIXELROOT32_ENABLE_PHYSICS=1`** and fail the build with an `#error` in
@@ -307,7 +309,7 @@ and `SpatialGrid` only exist when physics is on. `SPATIAL_QUERY`'s API is docume
 
 ## Composition Patterns
 
-**Grid-locked top-down movement — `examples/bomberbot`** (`GRID_SPACE=1`, `DEPTH_SORT=1`):
+**Grid-locked top-down movement — `games/bomberbot`** (in PixelRoot32-Demo-Projects) (`GRID_SPACE=1`, `DEPTH_SORT=1`):
 13x11 board of 16 px cells; `inline constexpr GridSpec kBoardGrid` folds the status band into
 `originY` so `containsCell()` rejects it for free. One `GridMotion mv` per actor
 (`PlayerActor.h:134`), `kPlayerStepsPerCell = 12`, `kEnemyStepsPerCell = 20`. Logic runs on a
@@ -315,7 +317,7 @@ fixed 20 ms accumulator (`kLogicStepMs`, clamped to 4 catch-up steps), so `tickS
 steps, never milliseconds. Bomberbot writes its own bottom-edge `drawLowerLast` comparator
 rather than using `compareByBottomY`, but the rule is identical.
 
-**Screen-by-screen rooms — `examples/legend_of_clone`, `examples/room_screen`**
+**Screen-by-screen rooms — `games/legend_of_clone`, `gameplay/room_screen`** (in PixelRoot32-Demo-Projects)
 (`GAMEPLAY_ROOM=1`): both own a `RoomGraph<N>`, build it from an exported `RoomLayer`, register
 a static trampoline, hand the graph to the `Scene`, then enter the start room.
 
@@ -330,18 +332,18 @@ snapCameraToRoom(startRoom);                       // enterRoom only CLAMPS boun
 ```
 
 `legend_of_clone` layers scrolling transitions on top (widen bounds during the slide,
-`enterRoom()` on arrival to snap back). `room_screen` is the minimal reference: a 2x2 grid of
+`enterRoom()` on arrival to snap back). `room_screen` (in Demo-Projects `gameplay/`) is the minimal reference: a 2x2 grid of
 15x15-tile rooms in a `RoomGraph<4>` built from a Tilemap-Editor-exported layer, camera snapped
 with `camera.setPosition(math::Vector2(room.cameraMinX, room.cameraMinY))`.
 
-**Pooled projectiles — `examples/midway_clone`** (`OBJECT_POOL=1`): four `Scene`-member pools
+**Pooled projectiles — `games/midway_clone`** (in PixelRoot32-Demo-Projects) (`OBJECT_POOL=1`): four `Scene`-member pools
 (`ObjectPool<Bullet,8>`, `ObjectPool<Bullet,12>`, `ObjectPool<Enemy,10>`,
 `ObjectPool<Explosion,6>`), all `reset()` from the scene's `init()` *after* `Scene::init()` ran.
 `acquire()` returning `nullptr` is a normal outcome the game handles (a full pool drops the
 spawn rather than stalling the wave queue); a `static_assert` pins capacity against the largest
 wave. Waves are keyed to camera Y, not to a clock.
 
-**Grid math without motion — `examples/2048`** (`GRID_SPACE=1` only): `GridSpec` +
+**Grid math without motion — `games/2048`** (in PixelRoot32-Demo-Projects) (`GRID_SPACE=1` only): `GridSpec` +
 `cellToWorldX/Y` + `gridSpecIsValid`, no `GridMotion`, no depth sort. Swipes arrive through
 `Scene::onUnconsumedTouchEvent` (see **`pixelroot32-touch-input`**).
 
@@ -410,7 +412,7 @@ value) — call it once per frame and cache. `worldToCellX/Y` cost exactly one `
 ## Common Patterns
 
 ```cpp
-// Grid step with a game-owned enterability rule (examples/bomberbot)
+// Grid step with a game-owned enterability rule (games/bomberbot in Demo-Projects)
 if (gameplay::isMoving(mv)) {
     if (gameplay::tickStep(mv, kPlayerStepsPerCell)) { onArriveAtCell(); }
 } else {

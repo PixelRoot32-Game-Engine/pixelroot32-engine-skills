@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: esp32
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -16,9 +16,8 @@ Generate memory-efficient code using PixelRoot32's modular compilation, object p
 
 ## Source of Truth
 
-- `docs/MEMORY_MANAGEMENT_GUIDE.md` - Memory management
-- `docs/STYLE_GUIDE.md` - Best practices
-- `docs/ARCHITECTURE.md` - Subsystem details
+- `docs/architecture/memory-system.md` - Memory management (modular budgets, SRAM/flash figures)
+- `docs/architecture/projected-tilemap-producer-obligations.md` - Tilemap producer export contract
 
 ## Memory Savings by Subsystem
 
@@ -36,6 +35,14 @@ and that flag's `measure_no_*` build. RAM = `data + bss`, Flash = `text + data`.
 
 Baseline for reference: `measure_full` is RAM 103,289 B / Flash 348,297 B; `measure_all_off`
 is RAM 82,221 B / Flash 307,057 B.
+
+**1.10–1.12 deltas on top of that baseline** (from the engine CHANGELOG, not re-measured here):
+`StaticLayerSnapshot` costs one logical framebuffer of heap per scene (~57 KB at 240×240,
+default off); `PIXELROOT32_TFT_12BIT_COLOR` cuts SPI time 25% and shrinks each DMA line
+buffer 28,800 → 21,600 B at 60 lines/240-wide (+768 B pair LUT); `LINES_PER_BLOCK=60` is
+actually reachable now (previously always fell back to 30); `Entity` grows 4 B only with
+`DEPTH_SORT=1` (256 B at 64 entities); the executed projected-tilemap path measured
++1,744 B flash / +80 B SRAM on `esp32dev` (`iso_dungeon`, now in Demo-Projects `graphics/`).
 
 **Audio is the biggest RAM win, not physics.** The dominant cost is the scheduler's own
 buffers — the probe reports `sizeof(ESP32AudioScheduler) = 15,968` B, next to
@@ -70,7 +77,7 @@ preprocessor context.
 `_SPATIAL_QUERY`, `_DEPTH_SORT`, `_GAMEPLAY_STATE_MACHINE`, `_GAMEPLAY_OBJECT_POOL`,
 `_GAMEPLAY_GRID_SPACE`, `_GAMEPLAY_ROOM`, `_CAMERA_TWEEN`, `_PROJECTION`, `_TILEMAP_PROJECTION`,
 `PIXELROOT32_ENABLE_TOUCH`, `_DIRTY_REGIONS`, `_DIRTY_REGION_PROFILING`,
-`PIXELROOT32_TFT_12BIT_COLOR`
+`PIXELROOT32_TFT_12BIT_COLOR`, `_DIALOG`, `_FONT_LATIN1`
 
 **`#ifdef`-tested — undefined by default, therefore effectively off.** A value of `0` still
 enables them; define or omit, never `=0`:
@@ -81,13 +88,17 @@ enables them; define or omit, never `=0`:
 **Driver / DMA knobs:** `PIXELROOT32_TFT_ESPI_LINES_PER_BLOCK` (default 60),
 `PIXELROOT32_TFT_ESPI_LINES_PER_BLOCK_FALLBACK` (default 30).
 
+**Physics tuning knobs (compile-time, no heap):** `PHYSICS_BIAS` (default 0.2f),
+`PHYSICS_SLOP` (default 0.02f), `PHYSICS_REST_THRESHOLD` (default 0.0f = off),
+`PHYSICS_MAX_CANDIDATES_PER_BODY` (default 64).
+
 ### Cross-Flag Rules (hard `#error` in `include/platforms/PlatformDefaults.h`)
 
 | Rule | Location |
 |------|----------|
-| `_INTERACTION_TRIGGERS` or `_SPATIAL_QUERY` **require** `PIXELROOT32_ENABLE_PHYSICS=1` | `:171-173` |
-| `_TILEMAP_PROJECTION` **requires** `PIXELROOT32_ENABLE_PROJECTION` | `:178-179` |
-| `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is now a hard `#error` tripwire | `:137-139` |
+| `_INTERACTION_TRIGGERS` or `_SPATIAL_QUERY` **require** `PIXELROOT32_ENABLE_PHYSICS=1` | `:193-194` |
+| `_TILEMAP_PROJECTION` **requires** `PIXELROOT32_ENABLE_PROJECTION` | `:200-201` |
+| `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is now a hard `#error` tripwire | `:137-138` |
 
 There is **no** `EnableTilemapProjection` constant in `pixelroot32::platforms::config` —
 `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` is preprocessor-only and has no type-safe mirror.

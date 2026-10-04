@@ -7,7 +7,7 @@ metadata:
   domain: tooling
   language: cpp
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -16,16 +16,17 @@ Generate tests using Unity framework with PlatformIO, mock implementations, and 
 
 ## Source of Truth
 
-- `docs/TESTING_GUIDE.md` - Testing practices
+- `platformio.ini` (`[env:native_test]` sections) - Test environment definitions
 - `test/test_config.h` - Shared utilities and macros
 - `test/mocks/` - Mock implementations
 
 ## Running Tests
 
-`platformio.ini` defines **exactly two buildable test environments**: `[env:native_test]` and
-`[env:native_test_gameplay]`. Every other section (`[base]`, `[base_esp32]`, `[base_native]`,
-`[profile_*]`, `[native_*]`, `[esp32_*]`) is a **template without the `env:` prefix and cannot be
-passed to `-e`**.
+`platformio.ini` defines **three buildable test environments**: `[env:native_test]`,
+`[env:native_test_gameplay]` and `[env:native_test_physics_rest]` (rest-threshold snap
+pinned on, default build pins it inert). Every other section (`[base]`, `[base_esp32]`,
+`[base_native]`, `[profile_*]`, `[native_*]`, `[esp32_*]`) is a **template without the
+`env:` prefix and cannot be passed to `-e`**.
 
 ```bash
 # Run the flags-off suite set (default contract)
@@ -33,6 +34,9 @@ pio test -e native_test
 
 # Run the gameplay/projection capability suites (flags ON) — see "Flag-Gated Suites"
 pio test -e native_test_gameplay
+
+# Run the rest-threshold snap suite (PHYSICS_REST_THRESHOLD on)
+pio test -e native_test_physics_rest -f "test_physics_rest"
 
 # Run a single suite: -f / --filter, matching the `test_filter` key
 pio test -e native_test -f "test_physics_actor"
@@ -65,10 +69,11 @@ stub branch — **the suite passes without asserting anything (a vacuous pass).*
 
 | Environment | Purpose | Gameplay/projection flags |
 |-------------|---------|---------------------------|
-| `[env:native_test]` (`platformio.ini:96`) | Proves the **flags-off contract**: no behavior change for existing examples | all default (off) |
-| `[env:native_test_gameplay]` (`platformio.ini:141`) | `extends = env:native_test`; **the only place the gameplay capability assertions actually execute** | 12 flags forced to `1` |
+| `[env:native_test]` (`platformio.ini:90`) | Proves the **flags-off contract**: no behavior change for existing examples | all default (off) |
+| `[env:native_test_gameplay]` (`platformio.ini:136`) | `extends = env:native_test`; **the only place the gameplay capability assertions actually execute** | 13 flags forced to `1` |
+| `[env:native_test_physics_rest]` (`platformio.ini:163`) | Pins the rest-threshold snap with `PHYSICS_REST_THRESHOLD` on (default build pins it inert) | rest threshold on |
 
-`[env:native_test_gameplay]` adds exactly these 12 `-D` flags, all `=1`:
+`[env:native_test_gameplay]` adds exactly these 13 `-D` flags, all `=1`:
 
 ```
 PIXELROOT32_ENABLE_GAMEPLAY_EVENTS      PIXELROOT32_ENABLE_GAMEPLAY_OBJECT_POOL
@@ -76,7 +81,7 @@ PIXELROOT32_ENABLE_INTERACTION_TRIGGERS PIXELROOT32_ENABLE_GAMEPLAY_GRID_SPACE
 PIXELROOT32_ENABLE_SPATIAL_QUERY        PIXELROOT32_ENABLE_GAMEPLAY_ROOM
 PIXELROOT32_ENABLE_DEPTH_SORT           PIXELROOT32_ENABLE_CAMERA_TWEEN
 PIXELROOT32_ENABLE_GAMEPLAY_STATE_MACHINE PIXELROOT32_ENABLE_PROJECTION
-                                        PIXELROOT32_ENABLE_STATIC_LAYER_SNAPSHOT
+PIXELROOT32_ENABLE_DIALOG               PIXELROOT32_ENABLE_STATIC_LAYER_SNAPSHOT
                                         PIXELROOT32_ENABLE_TILEMAP_PROJECTION
 ```
 
@@ -88,6 +93,9 @@ PIXELROOT32_ENABLE_GAMEPLAY_STATE_MACHINE PIXELROOT32_ENABLE_PROJECTION
 - `test_static_layer_snapshot`
 - every `test_gameplay_*` suite (8 of them)
 - `test_tilemap_projected_draw`, `test_tilemap_projected_dirty_skip`
+- `test_dialog_types`, `test_dialog_box`, `test_gameplay_dialog_runner`, `test_dialog_gating_integration`
+- `test_physics_rest` (dual-mode: default env pins the threshold inert, `native_test_physics_rest` pins the snap)
+- `test_scene_transition` ST-15..ST-18 (`TransitionConfig` per-call cases)
 
 Rationale is stated in-repo at `platformio.ini:135-140`. A green `native_test` run is **not**
 evidence that a flag-gated capability works — always re-run the affected suite under
@@ -115,13 +123,13 @@ test/
     └── MockRenderer.h
 ```
 
-`test/unit/` currently holds **83 suite directories**. `[env:native_test]` selects them plus a
-fixed set of integration suites (`platformio.ini:107-108`):
+`test/unit/` currently holds **91 suite directories**. `[env:native_test]` selects them plus a
+fixed set of integration suites (`platformio.ini:101`), including `test_dialog_gating_integration`:
 
 ```ini
 test_filter = unit/*, test_player_jump_integration, test_background_palette_render_integration,
               test_engine_integration, test_tile_collection_integration,
-              test_user_data_integration, test_game_loop
+              test_user_data_integration, test_game_loop, test_dialog_gating_integration
 test_ignore = test_tile_performance_integration, test_user_data_esp32_performance
 ```
 
@@ -314,15 +322,16 @@ Suites marked **†** are flag-gated and pass vacuously outside `-e native_test_
 |-----------|-------|-------------|
 | Camera | `pixelroot32-camera2d` | `test_camera2d`, `test_camera_effects`, `test_camera_tween`† |
 | Audio | `pixelroot32-audio` | `test_audio`, `test_audio_command_queue`, `test_audio_engine`, `test_audio_music_types`, `test_audio_scheduler`, `test_apu_core`, `test_music_player` |
-| Rendering | `pixelroot32-sprite-renderer` | `test_graphics`, `test_color`, `test_rgb444`, `test_compute_span_table`, `test_dirty_grid`, `test_dirty_grid_intersects_prev_dirty`, `test_sprite4bpp_framebuffer`, `test_static_tilemap_layer_cache`, `test_static_layer_snapshot`†, `test_font_manager`, `test_display_config`, `test_tile_animation`, `test_tile_attributes`, `test_tile_attributes_unit`, `test_tile_mask`, `test_tile_consumption_helper` |
-| Physics | `pixelroot32-physics` | `test_collision_primitives`, `test_collision_system`, `test_collision_types`, `test_physics_actor`, `test_physics_expansion`, `test_physics_scheduler`, `test_kinematic_actor`, `test_rigid_actor`, `test_sensor_actor`, `test_tile_collision_builder`, `test_tile_pixel_collision`, `test_rect` |
+| Rendering | `pixelroot32-sprite-renderer` | `test_graphics`, `test_color`, `test_rgb444`, `test_compute_span_table`, `test_dirty_grid`, `test_dirty_grid_intersects_prev_dirty`, `test_sprite4bpp_framebuffer`, `test_static_tilemap_layer_cache`, `test_static_layer_snapshot`†, `test_font_manager`, `test_text_layout`, `test_display_config`, `test_tile_animation`, `test_tile_attributes`, `test_tile_attributes_unit`, `test_tile_mask`, `test_tile_consumption_helper`, `test_tilemap_foot_anchor` |
+| Physics | `pixelroot32-physics` | `test_collision_primitives`, `test_collision_system`, `test_collision_types`, `test_physics_actor`, `test_physics_expansion`, `test_physics_scheduler`, `test_kinematic_actor`, `test_rigid_actor`, `test_sensor_actor`, `test_tile_collision_builder`, `test_tile_pixel_collision`, `test_rect`, `test_collision_segments`†, `test_physics_limits`, `test_physics_rest`, `test_position_correction` |
+| Dialog | `pixelroot32-dialog` | `test_dialog_types`, `test_dialog_box`, `test_gameplay_dialog_runner`†, `test_dialog_gating_integration` |
 | UI | `pixelroot32-ui-system` | `test_ui`, `test_ui_sprite`, `test_ui_touchwidget`, `test_uimanager` |
 | Scenes | `pixelroot32-scene-manager` | `test_scene`, `test_scene_manager`, `test_scene_transition`, `test_transition_effect`, `test_diagonal_wipe`, `test_directional_iris`, `test_engine` |
 | Input | `pixelroot32-touch-input` | `test_TouchEventDispatcher`, `test_TouchEventQueue`, `test_TouchStateMachine`, `test_touch_calibration`, `test_xpt2046_adapter`, `test_input_config`, `test_input_manager` |
 | Particles | `pixelroot32-particles` | `test_particle_emitter` |
 | Entities | `pixelroot32-entity-actor` | `test_actor`, `test_entity`, `test_static_actor`, `test_actor_touch_controller` |
 | Projection | `pixelroot32-projection` | `test_math_projection`, `test_gameplay_projection`†, `test_projected_map_bounds`, `test_scene_depth_sort`†, `test_tilemap_projected_draw`†, `test_tilemap_projected_dirty_skip`†, `test_tilemap_foot_anchor`, `test_iso_dungeon_projected_conversion` |
-| Gameplay framework | `pixelroot32-gameplay-framework` | `test_gameplay_event_bus`†, `test_gameplay_grid_motion`†, `test_gameplay_grid_space`†, `test_gameplay_object_pool`†, `test_gameplay_projection`†, `test_gameplay_room_graph`†, `test_gameplay_room_layout`†, `test_gameplay_state_machine`†, `test_spatial_query`†, `test_interaction_tracker`, `test_room_scene_int` |
+| Gameplay framework | `pixelroot32-gameplay-framework` | `test_gameplay_event_bus`†, `test_gameplay_grid_motion`†, `test_gameplay_grid_space`†, `test_gameplay_object_pool`†, `test_gameplay_projection`†, `test_gameplay_room_graph`†, `test_gameplay_room_layout`†, `test_gameplay_state_machine`†, `test_spatial_query`†, `test_interaction_tracker`, `test_room_scene_int`, `test_gameplay_dialog_runner`† |
 | Core / platform | *(no dedicated skill)* | `test_math`, `test_platforms`, `test_platform_capabilities`, `test_platform_log` |
 
 ## Agent Constraints
