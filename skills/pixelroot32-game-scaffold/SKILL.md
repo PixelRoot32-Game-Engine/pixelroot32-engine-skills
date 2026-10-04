@@ -6,7 +6,7 @@ compatibility: opencode>=0.1.0
 metadata:
   domain: engine
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -15,11 +15,11 @@ Every PixelRoot32 game is a **self-contained PlatformIO project** (PC via SDL2 `
 
 ## Source of Truth
 
-Derived from the engine's shipped examples (self-contained PlatformIO projects):
+Derived from shipped, self-contained PlatformIO projects:
 
-- `examples/hello_world/` — the **minimal** reference: engine boots → scene draws → input works. Read this first.
-- `examples/snake/` — the audio variant: `Engine(config, inputConfig, audioConfig)` with an `SDL2_AudioBackend`.
-- `examples/README.md` — catalogue of every example, its environments, and where each `PIXELROOT32_ENABLE_*` capability is demonstrated.
+- `getting_started/hello_world/` in PixelRoot32-Demo-Projects — the **minimal** reference: engine boots → scene draws → input works. Read this first. Uses the registry `lib_deps` form.
+- `games/snake/` in PixelRoot32-Demo-Projects — the audio variant: `Engine(config, inputConfig, audioConfig)` with an `SDL2_AudioBackend`.
+- `examples/README.md` in PixelRoot32-Game-Engine — catalogue of the in-engine examples, their environments, and where each `PIXELROOT32_ENABLE_*` capability is demonstrated.
 - Engine headers: `include/graphics/DisplayConfig.h`, `include/input/InputConfig.h`, `include/platforms/EngineConfig.h`, `include/core/Engine.h`.
 
 ## Directory Layout
@@ -28,7 +28,9 @@ Derived from the engine's shipped examples (self-contained PlatformIO projects):
 <game-name>/
 ├── platformio.ini          # root: default_envs + per-environment build flags
 ├── .gitignore
-├── README.md               # optional but recommended (mirror examples/README.md)
+├── README.md               # required in Demo-Projects (mirror an existing game README); recommended elsewhere
+├── screenshots/
+│   └── screenshot.png      # required in Demo-Projects
 ├── lib/
 │   └── platformio.ini      # [base], [base_esp32], [base_native] — shared by all envs
 └── src/
@@ -111,6 +113,38 @@ build_flags =
 ```
 
 `env:esp32dev` / `env:esp32s3` add `extends = base_esp32`, `board`, `framework = arduino`, the same `symlink://` lib_deps, `-D PLATFORM_ESP32DEV` / `-D PLATFORM_ESP32S3`, the TFT driver flags, pins, and `-Isrc`.
+
+### `platformio.ini` — root (standalone: registry form)
+
+Standalone games (everything in Demo-Projects) resolve the engine from the PlatformIO registry instead of `symlink://`. Reference: `getting_started/hello_world/platformio.ini` in PixelRoot32-Demo-Projects.
+
+```ini
+[platformio]
+default_envs = native
+extra_configs = lib/platformio.ini
+
+[env:native]
+extends = base_native
+lib_deps =
+    gperez88/PixelRoot32-Game-Engine@^1.12.0
+build_flags =
+    ${base_native.build_flags}
+    -D PHYSICAL_DISPLAY_WIDTH=240
+    -D PHYSICAL_DISPLAY_HEIGHT=240
+    -Isrc
+    -Iinclude
+    -I.pio/libdeps/native/PixelRoot32-Game-Engine/include
+    -I.pio/libdeps/native/PixelRoot32-Game-Engine/src
+    ; Windows (MSYS2/MinGW) — comment out on macOS (use -I/opt/homebrew/include -L/opt/homebrew/lib):
+    -IC:/msys64/mingw64/include
+    -LC:/msys64/mingw64/lib
+    -O2
+    -Wall
+    -Wextra
+    -mconsole
+```
+
+`env:esp32dev` / `env:esp32s3` mirror this with `extends = base_esp32`, `board`, `framework = arduino`, the same registry `lib_deps`, the TFT driver flags, pins, and `-Isrc`. A git branch or tag also resolves: `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>` — but then the `-I.pio/libdeps/...` lines must match the checked-out folder name (see gotcha 2).
 
 ### `src/main.cpp` — platform selector ONLY
 
@@ -249,10 +283,11 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 
 | Fork | Options | Rule |
 |------|---------|------|
-| Engine dependency | inside engine repo vs standalone | Inside repo → `lib_deps = symlink://<relative path to engine root>` (examples use `../../` from `examples/<name>`). Standalone → `lib_deps = PixelRoot32-Game-Engine=<git ref or registry tag>`. |
+| Engine dependency | inside engine repo vs standalone | Inside engine repo → `lib_deps = symlink://<relative path to engine root>`. Standalone (Demo-Projects) → registry `lib_deps = gperez88/PixelRoot32-Game-Engine@^1.12.0`, or git `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>`. |
 | Platforms | native only / +esp32dev / +esp32s3 | Always include `native`; add ESP32 envs + matching `platforms/*.h` as needed. |
-| Audio | with / without | With audio, add `SDL2_AudioBackend` + `Engine(config, inputConfig, audioConfig)` (see `examples/snake/src/platforms/native.h`). Without, `Engine(config, inputConfig)`. |
-| Display | ST7735 (128×128) / ST7789 (240×240) / OLED | Pick `DisplayType` + TFT flags + `PHYSICAL_DISPLAY_WIDTH/HEIGHT`. `OLED_SSD1306`/`OLED_SH1106` use U8g2 (`-D PIXELROOT32_USE_U8G2_DRIVER`, I2C pin ctor — see `examples/flappy_bird`). |
+| Audio | with / without | With audio, add `SDL2_AudioBackend` + `Engine(config, inputConfig, audioConfig)` (see `games/snake/src/platforms/native.h` in Demo-Projects). Without, `Engine(config, inputConfig)`. |
+| Display | ST7735 (128×128) / ST7789 (240×240) / OLED | Pick `DisplayType` + TFT flags + `PHYSICAL_DISPLAY_WIDTH/HEIGHT`. `OLED_SSD1306`/`OLED_SH1106` use U8g2 (`-D PIXELROOT32_USE_U8G2_DRIVER`, I2C pin ctor — see `games/flappy_bird/src/platforms/esp32_c3.h` in Demo-Projects). |
+| Demo-Projects files | README + screenshots | Every game in Demo-Projects ships `README.md` and `screenshots/screenshot.png` — both required there, not optional. |
 | Resolution | physical vs logical | Logical ≤ physical. Set `-D LOGICAL_WIDTH/HEIGHT` to render smaller and let the engine nearest-neighbor scale (memory savings). |
 | Feature gates | `PIXELROOT32_ENABLE_*` | Pass as `-D PIXELROOT32_ENABLE_<X>=1` on the env `build_flags`. Consult `examples/README.md` "Where each opt-in capability is demonstrated" before enabling. |
 
@@ -266,7 +301,7 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 
 ## Gotchas
 
-1. **`symlink://` path is relative to the PROJECT dir, not the engine.** `examples/hello_world` uses `symlink://../../` because it sits at `examples/<name>/` inside the engine repo. Compute the path from your project folder to the engine root; a wrong path fails at `pio run` with "library not found".
+1. **`symlink://` is relative to the PROJECT dir, not the engine, and only fits projects inside the engine repo.** A project at `examples/<name>/` would use `symlink://../../`. Standalone projects (everything in Demo-Projects) use the registry form instead — see `getting_started/hello_world/platformio.ini`. A wrong path or form fails at `pio run` with "library not found".
 2. **`-I.pio/libdeps/native/PixelRoot32-Game-Engine/include` (and `/src`)** assume the dependency resolves to a folder named `PixelRoot32-Game-Engine`. True for the symlink and registry; a Git-branch `lib_deps` whose `library.json` names the lib differently breaks these `-I` lines — adjust the name to match.
 3. **`DisplayConfig` field order is positional and fixed**: `(DisplayType, rotation, physicalW, physicalH, logicalW, logicalH, xOffset, yOffset, customSurface=nullptr)`. `logW==0` means "same as physical". `DisplayType::CUSTOM` needs a `DrawSurface*`.
 4. **`DisplayType` enum is unscoped** (`ST7789, ST7735, ILI9341, ILI9341_2, OLED_SSD1306, OLED_SH1106, NONE, CUSTOM`) in `pixelroot32::graphics`. Native/SDL uses `NONE`.
