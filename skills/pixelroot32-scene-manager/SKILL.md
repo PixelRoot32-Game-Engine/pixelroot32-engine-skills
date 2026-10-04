@@ -7,7 +7,7 @@ metadata:
   domain: engine
   subsystem: core
   module: scene-manager
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
   platform: cross-platform
 ---
 
@@ -160,7 +160,7 @@ class RoomScene : public pixelroot32::core::Scene {
 };
 ```
 
-Shipped references for this wiring: `examples/legend_of_clone/src/TopDownScene.cpp` and `examples/room_screen/src/RoomScreenScene.cpp`.
+Shipped references for this wiring: `games/legend_of_clone/src/TopDownScene.cpp` and `gameplay/room_screen/src/RoomScreenScene.cpp` (both in PixelRoot32-Demo-Projects).
 
 `RoomGraph`, `RoomData`, `RoomLayer`, `buildRoomGraph` and `setOnEnter` live in **`pixelroot32-gameplay-framework`**; this skill only owns the `Scene` hook and the fact that it must be wired by hand.
 
@@ -235,6 +235,16 @@ manager.transitionToScene(&gameScene, TransitionType::Iris, 300,
 
 // DiagonalWipe transition
 manager.transitionToScene(&gameScene, TransitionType::DiagonalWipe, 400);
+
+// Per-call configuration (no carry-over between transitions)
+graphics::TransitionConfig cfg;
+cfg.type = graphics::TransitionType::DiagonalWipe;
+cfg.durationMs = 400;
+cfg.wipeDirection = graphics::WipeDirection::NW_SE;  // corner sweep direction
+cfg.subStepMs = 50;          // DiagonalWipe sub-step (0 = disabled)
+cfg.irisOutCx = 120; cfg.irisOutCy = 120;  // Iris Out center (-1 = buffer center)
+cfg.irisInCx = 120;  cfg.irisInCy = 120;   // Iris In center
+manager.transitionToScene(&gameScene, cfg);   // old overloads forward with defaults
 
 // State query
 bool transitioning = manager.isTransitioning();
@@ -361,11 +371,12 @@ gameScene → pushScene(pauseOverlay)
 6. **Sorting members are unguarded and `protected`**: `DepthComparator`, `depthComparator`, `depthSortEnabled` and `sortEntities()` are NOT behind `PIXELROOT32_ENABLE_DEPTH_SORT` (only `Entity::depthKey` is) and are `protected` — set them from inside a `Scene`-derived `init()`, never from outside. `DepthComparator` is a raw function pointer (`bool (*)(Entity*, Entity*)`), so no capturing lambda can be assigned to it.
 7. **`depthSortEnabled` re-sorts every frame**: when `true`, `draw()` sorts regardless of `needsSorting`. That is a per-frame cost on a fixed 64-entity array — enable it only for scenes whose depth order genuinely changes each frame.
 8. **`onRoomEnter` first-entry sentinel**: `fromIdx` is `0xFFFF` on the first entry, even though the parameters are plain `int`. Test for `0xFFFF`; do not assume `-1` or `< 0`. The hook only exists under `PIXELROOT32_ENABLE_GAMEPLAY_ROOM` (default 0).
-9. **`onRoomEnter` is NEVER invoked by the engine**: overriding it alone does nothing — the override silently never fires. `Scene::setRoomGraph()` only assigns the pointer, and `src/core/Scene.cpp` contains zero references to `onRoomEnter` or the room-graph member. The game MUST wire it itself via `RoomGraph::setOnEnter(callback, context)` with a static trampoline that forwards to the scene. **The engine's own header comment claiming "the base invokes `onRoomEnter` via the graph's `onEnter` callback" is stale and wrong** — do not "correct" this skill back from that comment. Working references: `examples/legend_of_clone/src/TopDownScene.cpp` and `examples/room_screen/src/RoomScreenScene.cpp`, both calling `rooms_.setOnEnter(onRoomEnterCallback, this)`.
-10. **Framebuffer optimization**: If ALL stacked scenes return `false` from `shouldRedrawFramebuffer()`, the engine skips `draw()` and `present()` for that frame.
-11. **Iris centers reset**: `TransitionEffect::init()` resets centers to -1. `SceneManager` stores and reapplies direction-specific centers.
-12. **Idempotent `init()`**: `Scene::init()` calls `resetState()` first. N invocations must not leak resources or leave dangling pointers. Always call `Scene::init()` in overrides — never call `physicsScheduler.init()` directly.
-13. **`resetState()` for owned resources**: Scenes with `unique_ptr` or external references must override `resetState()`, release owned resources **before** calling `Scene::resetState()` as the last operation.
+9. **`onRoomEnter` is NEVER invoked by the engine**: overriding it alone does nothing — the override silently never fires. `Scene::setRoomGraph()` only assigns the pointer, and `src/core/Scene.cpp` contains zero references to `onRoomEnter` or the room-graph member. The game MUST wire it itself via `RoomGraph::setOnEnter(callback, context)` with a static trampoline that forwards to the scene. **The engine's own header comment claiming "the base invokes `onRoomEnter` via the graph's `onEnter` callback" is stale and wrong** — do not "correct" this skill back from that comment. Working references: `games/legend_of_clone/src/TopDownScene.cpp` and `gameplay/room_screen/src/RoomScreenScene.cpp` (both in PixelRoot32-Demo-Projects), both calling `rooms_.setOnEnter(onRoomEnterCallback, this)`.
+10. **Framebuffer optimization**: If ALL stacked scenes return `false` from `shouldRedrawFramebuffer()`, the engine skips `draw()` and `present()` for that frame. Games that draw static layers themselves can cache them with `graphics::StaticLayerSnapshot` (`capture()`/`restore()`, ~57 KB heap per scene at 240x240, default off) — see **`pixelroot32-sprite-renderer`**.
+11. **Iris centers reset — pass a full config instead**: `TransitionEffect::init()` resets centers to -1. `SceneManager` stores and reapplies direction-specific centers, wipe direction and sub-step — prefer the `TransitionConfig` overload so one call carries type, direction, sub-step and both iris centers with no carry-over from earlier transitions.
+12. **Transitions from `restartState()` are honored**: a transition requested from a `restartState()` callback is applied, not dropped — the old drop was fixed, so do not work around it.
+13. **Idempotent `init()`**: `Scene::init()` calls `resetState()` first. N invocations must not leak resources or leave dangling pointers. Always call `Scene::init()` in overrides — never call `physicsScheduler.init()` directly.
+14. **`resetState()` for owned resources**: Scenes with `unique_ptr` or external references must override `resetState()`, release owned resources **before** calling `Scene::resetState()` as the last operation.
 
 ## Common Patterns
 

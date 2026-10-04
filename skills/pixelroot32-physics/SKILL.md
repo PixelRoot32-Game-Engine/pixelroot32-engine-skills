@@ -242,7 +242,7 @@ bool isWorldPixelSolid(const graphics::TileMap4bpp* tilemap,
 
 **Scope limit** — erosion is **per-tile**: it never reads neighbouring tiles. A wall built from several tiles therefore erodes 1px *at each tile seam*, producing seams the body can nick.
 
-**`CollisionMode` / `kCollisionMode` are NOT engine API.** They are **example-owned**, defined in `examples/legend_of_clone/src/GameConstants.h` inside namespace `legend_of_clone`, with zero occurrences anywhere under `include/` or `src/`. Never emit them as engine symbols. The pattern they demonstrate — compile-time mode selection with `if constexpr` plus a game-owned `kTileSolidErosionPx = 1` — is a valid usage reference; `examples/legend_of_clone` is the place to read it.
+**`CollisionMode` / `kCollisionMode` are NOT engine API.** They are **example-owned**, defined in `games/legend_of_clone/src/GameConstants.h` (PixelRoot32-Demo-Projects) inside namespace `legend_of_clone`, with zero occurrences anywhere under `include/` or `src/`. Never emit them as engine symbols. The pattern they demonstrate — compile-time mode selection with `if constexpr` plus a game-owned `kTileSolidErosionPx = 1` — is a valid usage reference; `games/legend_of_clone` is the place to read it.
 
 ### Multi-Hit Tile Consumption
 

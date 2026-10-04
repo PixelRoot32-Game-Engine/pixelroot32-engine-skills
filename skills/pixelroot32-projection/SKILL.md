@@ -9,7 +9,7 @@ metadata:
   module: projection
   feature_gate: PIXELROOT32_ENABLE_PROJECTION
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -29,7 +29,7 @@ Everything is opt-in; a `constexpr` spec costs zero SRAM.
 
 **Header**: `include/math/Projection.h`
 **Namespace**: `pixelroot32::math`
-**Feature gate**: `PIXELROOT32_ENABLE_PROJECTION` (default `0`, wraps the whole file; config mirror `pixelroot32::platforms::config::EnableProjection`, `EngineConfig.h:582`)
+**Feature gate**: `PIXELROOT32_ENABLE_PROJECTION` (default `0`, wraps the whole file; config mirror `pixelroot32::platforms::config::EnableProjection`, `EngineConfig.h:628`)
 
 ```cpp
 struct ProjectionSpec {
@@ -98,7 +98,7 @@ namespace detail { using pixelroot32::math::detail::projectionFloorDiv; }
 
 **Header**: `include/gameplay/DepthCompare.h`, `include/core/Entity.h`, `include/core/Scene.h`
 **Namespace**: `pixelroot32::gameplay`, `pixelroot32::core`
-**Feature gate**: `PIXELROOT32_ENABLE_DEPTH_SORT` for `depthKey` and `compareByDepthKey` (config mirror `config::EnableDepthSort`, `EngineConfig.h:522`); `compareByBottomY` is **unguarded**.
+**Feature gate**: `PIXELROOT32_ENABLE_DEPTH_SORT` for `depthKey` and `compareByDepthKey` (config mirror `config::EnableDepthSort`, `EngineConfig.h:568`); `compareByBottomY` is **unguarded**.
 
 ```cpp
 int16_t depthKey = 0;                                             // Entity.h:107, inside the guard
@@ -159,7 +159,7 @@ From `docs/architecture/projected-tilemap-producer-obligations.md`. None is gues
 5. **`tileWidth`/`tileHeight` keep their orthogonal meaning.** They feed `computeTilemapDirtyTracking`. They are the cell **stride**, not the diamond's on-screen size.
 6. **Row-major must be a valid painter's order.** Check `rowMajorIsPainterOrder(spec)`; enforce caller-side with a `static_assert` at the spec's declaration site (an aggregate cannot assert its own initializers under `-fno-exceptions`).
 
-**Palette-bank obligation.** `drawSprite` resolves colour through `getSpritePaletteSlot`, `drawTileMap` through `getBackgroundPaletteSlot` — two separate static arrays in `src/graphics/Color.cpp`. Converting a sprite-per-cell layer to `drawTileMap` therefore changes which bank it reads, silently, with no art change. Confirm both banks agree first; `iso_dungeon` gets away with it only via `setDualCustomPalette(PAL, PAL)`.
+**Palette-bank obligation.** `drawSprite` resolves colour through `getSpritePaletteSlot`, `drawTileMap` through `getBackgroundPaletteSlot` — two separate static arrays in `src/graphics/Color.cpp`. Converting a sprite-per-cell layer to `drawTileMap` therefore changes which bank it reads, silently, with no art change. Confirm both banks agree first; `iso_dungeon` gets away with it only via `setDualCustomPalette(PAL, PAL)`. Palette tails are zeroed per format, so an index past `paletteSize` resolves to black rather than stack garbage.
 
 **Props are not tiles.** Every tile layer draws before every entity and a `drawTileMap` call is atomic, so no layer arrangement expresses per-cell depth. Art a mover can pass *behind* must be a depth-sorted entity. The test is reachability, not size: `iso_dungeon`'s 40 px wall is a tile (nothing reachable sits behind it); its 30 px altar is an entity (the hero walks past both sides).
 
@@ -204,7 +204,7 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 
 ## Composition Patterns
 
-- **Declare the spec once, beside the map, with its invariants**, and emit it *outside* any sprite-format guard so a 4bpp-off build still has geometry (`examples/iso_dungeon/src/assets/IsoDungeonRoomTileMap.h:112`).
+- **Declare the spec once, beside the map, with its invariants**, and emit it *outside* any sprite-format guard so a 4bpp-off build still has geometry (`graphics/iso_dungeon/src/assets/IsoDungeonRoomTileMap.h` in PixelRoot32-Demo-Projects).
 - **Projection + depth sort**: tiles paint row-major unsorted; movers and reachable props are entities on one shared `renderLayer`, each writing `depthKey`, with `depthComparator` and `depthSortEnabled` set in the scene's `init()`. See `pixelroot32-scene-manager`.
 - **Projection + camera**: `expandProjectedMapBounds` -> `cameraRangeFor` -> `Camera2D::setBounds`/`setVerticalBounds`, then draw at origin `(0,0)`. See `pixelroot32-camera2d`.
 - **Projection + input**: `screenToCellX/Y` turns a touch into a cell. See `pixelroot32-touch-input`.
@@ -218,14 +218,14 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 - `depthKey` costs +4 bytes per `Entity` on 32-bit, 256 B at 64 entities.
 - `cellRangeForScreenRect` over-approximates under a non-orthogonal basis (~2.25x for 2:1 iso on 240x240). Each rejected cell is one bounds compare — far cheaper than a sprite decode. Intended overdraw.
 - `expandProjectedMapBounds` is `O(tileCount + 4)` and heap-free — scene init only, never per frame.
-- Flash-resident `Sprite4bpp` descriptors are read-only on ESP32: `iso_dungeon` gates its `computeSpanTable` + `const_cast` span wiring behind `#if !defined(ESP32)` (`IsoDungeonScene.cpp:45`), because writing `rowMinX`/`rowMaxX` into flash panics with `LoadStoreError` on first draw.
+- Flash-resident `Sprite4bpp` descriptors are read-only on ESP32: `iso_dungeon` gates its `computeSpanTable` + `const_cast` span wiring behind `#if !defined(ESP32)` (`IsoDungeonScene.cpp`, in Demo-Projects `graphics/iso_dungeon`), because writing `rowMinX`/`rowMaxX` into flash panics with `LoadStoreError` on first draw.
 
 ## Gotchas
 
 - `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is a hard `#error` (`PlatformDefaults.h:137-139`).
-- `TILEMAP_PROJECTION=1` without `PROJECTION=1` is a hard `#error` (`PlatformDefaults.h:178-179`).
+- `TILEMAP_PROJECTION=1` without `PROJECTION=1` is a hard `#error` (`PlatformDefaults.h:200-201`).
 - `CellRange`/`cellRangeForScreenRect` live **only** in `math::`; `gameplay::` does not forward them.
-- There is no `config::EnableTilemapProjection`. `config::EnableProjection` (`:582`) and `config::EnableDepthSort` (`:522`) do exist.
+- There is no `config::EnableTilemapProjection`. `config::EnableProjection` (`EngineConfig.h:628`) and `config::EnableDepthSort` (`EngineConfig.h:568`) do exist.
 - A `double` argument to any of the four conversion functions is a **deleted overload** — a compile error, deliberately, because on the C3 it would otherwise silently resolve to the `int` overload.
 - `screenToCellX/Y` **floor**; they do not clamp. Outside the map they return negative or out-of-range indices. Range-check yourself.
 - `rowMajorIsPainterOrder == false` does not mean the spec is invalid; a guard that rejects `false` wrongly rejects the Orthogonal and Oblique layouts.
@@ -234,9 +234,9 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 - Projected `drawTileMap` overloads take a **reference** and give `layerType` **no default**.
 - Draw at origin `(0,0)` after `Camera2D::apply()`; the display offset is already live in the renderer.
 - `depthComparator` and `depthSortEnabled` are `protected` `Scene` members — set them inside a `Scene`-derived `init()`.
-- `examples/iso_dungeon` declares **no `GridSpec`** at all. It still needs `PIXELROOT32_ENABLE_GAMEPLAY_GRID_SPACE=1` because `GridMotion` shares that flag. Do not invent a `GridSpec` for an isometric game.
+- `graphics/iso_dungeon` (in Demo-Projects) declares **no `GridSpec`** at all. It still needs `PIXELROOT32_ENABLE_GAMEPLAY_GRID_SPACE=1` because `GridMotion` shares that flag. Do not invent a `GridSpec` for an isometric game.
 - The `iso_dungeon` README says `gameplay::ProjectionSpec` in prose while the asset header uses `pixelroot32::math::ProjectionSpec`. Same type (a `using` alias); prefer the `math::` spelling in new code.
-- **The Tilemap Editor exports isometric scenes.** Per `docs/tools/tilemap-editor/isometric-guide.md`, the C++ export emits `ISO_PROJECTION`, the `TILESET_FOOT_Y` table, a rectangular `TILE_WIDTH`/`TILE_HEIGHT` cell stride and `inline constexpr` dimensions, with `static_assert`s that fire at the consuming project's compile. An isometric scene round-trips — do not hand-write the export. `docs/architecture/projected-tilemap-producer-obligations.md` still calls this an unbuilt "phase-2" generator delta; **that passage is stale**. The obligations themselves remain binding: any `TileMapGeneric` built by hand or by another tool must still satisfy all seven.
+- **The Tilemap Editor exports isometric scenes — except the foot table.** Per `docs/tools/tilemap-editor/isometric-guide.md`, the C++ export emits `ISO_PROJECTION`, a rectangular `TILE_WIDTH`/`TILE_HEIGHT` cell stride and `inline constexpr` dimensions, with `static_assert`s that fire at the consuming project's compile. `TILESET_FOOT_Y` is still hand-added per the export contract (`cpp_code_generator.cpp` cannot emit it yet, and `Renderer.h` notes the editor exports no foot-anchor table today). An isometric scene round-trips — do not hand-write the rest of the export. `docs/architecture/projected-tilemap-producer-obligations.md` still calls this an unbuilt "phase-2" generator delta; **that passage is stale**. The obligations themselves remain binding: any `TileMapGeneric` built by hand or by another tool must still satisfy all seven.
 
 ## Common Patterns
 
@@ -274,8 +274,8 @@ void IsoDungeonScene::init() {
     depthSortEnabled = true;
 }
 
-depthKey = static_cast<int16_t>(position.y);   // HeroActor.cpp:185 — projected anchor
-depthKey = static_cast<int16_t>(centreY_);     // PropEntity.cpp:36
+depthKey = static_cast<int16_t>(position.y);   // HeroActor.cpp — projected anchor (Demo-Projects graphics/iso_dungeon)
+depthKey = static_cast<int16_t>(centreY_);     // PropEntity.cpp
 depthKey = INT16_MIN;                          // always draw first
 ```
 

@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: cross-platform
-  engine_version: "1.9.0+unreleased"
+  engine_version: "1.12.0"
 ---
 
 ## Overview
@@ -17,9 +17,9 @@ Generate C++17 code for PixelRoot32 Game Engine following documented conventions
 ## Source of Truth
 
 All code generation must reference:
-- `docs/STYLE_GUIDE.md` - Primary coding conventions
-- `docs/ARCHITECTURE.md` - Layer hierarchy and component relationships
-- `docs/API_REFERENCE.md` - Public API definitions
+- `docs/architecture/` - Layer docs and subsystem details (memory, physics, projection contracts)
+- `docs/api/` - Public API definitions
+- `docs/guide/` - Guides and patterns
 
 ## Naming Conventions
 
@@ -49,7 +49,7 @@ Notes:
 - `pixelroot32::gameplay` holds the reusable gameplay building blocks (see `pixelroot32-gameplay-framework`).
 
 - **Internal namespaces** (do NOT use directly):
-  - `pixelroot32::platform`
+  - `pixelroot32::platforms` (plus `platforms::config`, `platforms::mock`)
   - `pixelroot32::internal`
   - `pixelroot32::detail`
 
@@ -86,8 +86,7 @@ Always order class members as:
 ## Include Guidelines
 
 - User code includes headers ONLY from `include/`
-- Headers in `include/` may include `src/` headers
-- Source files in `src/` must NOT include `include/` headers
+- Headers in `src/` implement against `include/` — `include/` never reaches into `src/`
 
 ## Code Generation Examples
 
@@ -167,6 +166,17 @@ For subsystem-specific code generation, use the specialized skills:
 | Dialog | `pixelroot32-dialog` | Branching dialogue and choice menus: `DialogRunner` headless state machine, `DialogLine`/`DialogChoice` flash scripts, `DialogBox` panel, speaker portraits, selection caret |
 
 For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`. For creating a new game project from scratch (PlatformIO scaffold, platform entry points, minimal scene), see `pixelroot32-game-scaffold`.
+
+## Tilemap Editor export contract
+
+Isometric exports must satisfy `docs/architecture/projected-tilemap-producer-obligations.md` (reference: `graphics/iso_dungeon` in PixelRoot32-Demo-Projects). Six rules the current generator cannot all emit — hand-check them:
+
+- Rectangular cell stride: one `TILE_WIDTH`/`TILE_HEIGHT` pair expressing the cell (a 32×16 cell with 40 px art needs stride ≠ bitmap size).
+- `TILESET_FOOT_Y` table (hand-added; the editor exports no foot-anchor table yet).
+- `ISO_PROJECTION` emitted OUTSIDE any sprite-format guard (gameplay places actors where no tile draws; gating geometry on 4bpp breaks 4bpp-off builds).
+- `inline constexpr` dimensions, not `static const` (they cross translation units).
+- `uint8_t` tileset pool (never `uint16_t` art through `reinterpret_cast<const uint8_t*>` — endianness trap).
+- Props (altar, pillar) as depth-sorted sprites in their own header — never tile-layer entries.
 
 ## Logging Integration
 
