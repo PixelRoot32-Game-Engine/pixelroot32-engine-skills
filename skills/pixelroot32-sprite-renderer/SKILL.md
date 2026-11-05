@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: renderer
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.14.0"
   # No `feature_gate` key: the renderer subsystem itself is always compiled.
   # The optional sub-features it hosts are gated individually and documented in
   # the body: PIXELROOT32_ENABLE_DIRTY_REGIONS,
@@ -225,10 +225,10 @@ returns `true` if any of them was dirty in the previous frame. Exact edge cases:
 **Header**: `include/graphics/DrawSurface.h`
 
 ```cpp
-virtual void flushPendingTransfers() {}   // :246 — virtual, NOT pure; empty by default
+virtual void flushPendingTransfers() {}   // :275 — virtual, NOT pure; empty by default
 ```
 
-Contrast `virtual void present() = 0;` (`:230`), which every driver must implement.
+Contrast `virtual void present() = 0;` (`:259`), which every driver must implement.
 Rationale: some drivers defer the tail of a frame so its bus time overlaps the next
 frame, and they assume a `present()` will follow. A scene reporting
 `shouldRedrawFramebuffer() == false` breaks that assumption — without this call the
@@ -238,6 +238,42 @@ bus stays claimed and every other device on it is locked out. The Engine calls
 pending correctly inherits the no-op. **Shared-bus rule: any code touching SPI, the TFT,
 or the DMA line buffers calls `waitForPendingDMA()` first** — the engine already wires it
 for the touch bridge, `freeScalingBuffers()`, destructor, `init()` and `setRotation()`.
+
+**`PIXELROOT32_DRAIN_PRESENT`** (engine 1.14.0; **undefined by default**, opt-in with
+`-D PIXELROOT32_DRAIN_PRESENT`): the Engine also calls `flushPendingTransfers()` right
+after every `present()` (`src/core/Engine.cpp:316-321`), closing the transfer at the end
+of present instead of letting its tail overlap the next frame's update/draw. Define it
+when present time approaches the frame budget and the panel shows **torn scanlines**
+(the surface is being rewritten while a transfer is still in flight). Cost: the overlap,
+bounded by one block of the present path. Leave it undefined otherwise — the default
+keeps the overlap.
+
+### DrawSurface::setPalette8
+
+**Header**: `include/graphics/DrawSurface.h`
+
+```cpp
+virtual void setPalette8(const uint16_t* lut565) { (void)lut565; }   // :178 — no-op by default
+```
+
+Replaces the driver's default expansion of the 8bpp surface (RGB332 through
+`color8to16()`) with a caller table, so a scene whose bytes are **palette indices**
+presents its palette exactly instead of through RGB332 quantisation.
+
+- `lut565`: **256 entries**, indexed by surface byte, each an RGB565 colour in the
+  engine's convention (as `color565()` returns). Caller keeps ownership — the table
+  must outlive its use (static/global, never a stack array). **`nullptr` restores the
+  default expansion.**
+- It is the **whole presentation mapping**, not an overlay. **Only the present path
+  reads it**: `drawTileDirect()` and the sprite primitives still store bytes and never
+  consult it.
+- Base implementation is a no-op; drivers without an 8-bit buffer ignore the call.
+  `TFT_eSPI_Drawer` overrides it (`include/drivers/esp32/TFT_eSPI_Drawer.h:130`) for
+  both its RGB565 and RGB444 present formats, rebuilding the existing 256-entry
+  `paletteLUT` — no extra RAM, no extra per-frame work.
+- Call it **between presents**, never mid-frame: a change while a transfer is in flight
+  would split one frame across two mappings. The TFT override waits for pending DMA
+  before rebuilding the table (`src/drivers/esp32/TFT_eSPI_Drawer.cpp:427-433`).
 
 ### Static Tilemap Cache
 
@@ -364,7 +400,7 @@ or follow that gating pattern; do not assign `rowMinX`/`rowMaxX` on a flash obje
 **Namespace**: `pixelroot32::graphics`
 **Feature gate**: the header itself has **none** — it is deliberately platform-neutral
 so native tests can verify it. The *driver path* is gated by
-`PIXELROOT32_TFT_12BIT_COLOR` (default **0**, `PlatformDefaults.h:266-268`, defined
+`PIXELROOT32_TFT_12BIT_COLOR` (default **0**, `PlatformDefaults.h:421-422`, defined
 **nested inside** `#if defined(PIXELROOT32_USE_TFT_ESPI_DRIVER)`).
 
 ```cpp
@@ -376,7 +412,7 @@ inline void packRgb444Pair(uint8_t* dst, uint16_t left, uint16_t right); // :61
 the low 12 of either colour are ignored, so raw palette entries may be passed
 unmasked.
 
-**Experimental — not verified on hardware** (`docs/api/config.md:52`). It cuts 25% of
+**Experimental — not verified on hardware** (`docs/api/config.md:53`). It cuts 25% of
 SPI bus time per frame and shrinks each DMA line buffer by 25%, but **the driver
 silently keeps RGB565 when the physical width is not a multiple of 4** — enabling the
 flag is not proof the path is active. The RGB332→RGB444 mapping is bijective but

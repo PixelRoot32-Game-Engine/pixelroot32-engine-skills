@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.14.0"
 ---
 
 ## Overview
@@ -42,11 +42,14 @@ All code generation must reference:
   - `pixelroot32::math`
   - `pixelroot32::gameplay`
   - `pixelroot32::audio` (when `PIXELROOT32_ENABLE_AUDIO=1`)
+  - `pixelroot32::networking` (when `PIXELROOT32_ENABLE_NETWORKING=1`; default 0, ESP32 and native only)
+  - `pixelroot32::persistence` (when `PIXELROOT32_ENABLE_PERSISTENCE=1`; default 0)
 
 Notes:
 - `pixelroot32::math` also carries `ProjectionSpec`, `CellRange` and the projection free functions (see `pixelroot32-projection`).
 - `pixelroot32::graphics::particles` exists for emitters and presets (see `pixelroot32-particles`).
 - `pixelroot32::gameplay` holds the reusable gameplay building blocks (see `pixelroot32-gameplay-framework`).
+- `pixelroot32::networking` and `pixelroot32::persistence` are opt-in modules: their macros default to 0 in `include/platforms/PlatformDefaults.h` and contribute no symbols when off. Wrap every use in `#if PIXELROOT32_ENABLE_NETWORKING` / `#if PIXELROOT32_ENABLE_PERSISTENCE` (see `pixelroot32-networking`, `pixelroot32-persistence`).
 
 - **Internal namespaces** (do NOT use directly):
   - `pixelroot32::platforms` (plus `platforms::config`, `platforms::mock`)
@@ -163,6 +166,8 @@ For subsystem-specific code generation, use the specialized skills:
 | Entities | `pixelroot32-entity-actor` | Actor types, lifecycle |
 | Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected camera bounds |
 | Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
+| Networking | `pixelroot32-networking` | ESP-NOW peer-to-peer multiplayer (`PIXELROOT32_ENABLE_NETWORKING`): `NetSession` discovery and reliable delivery, `NetTransport` backends (`ESP32EspNowTransport`, `LoopbackTransport`), `NetCounter` shared state |
+| Persistence | `pixelroot32-persistence` | Settings and save slots (`PIXELROOT32_ENABLE_PERSISTENCE`): `IKeyValueStore`/`ISlotStore`, `StoreResult`, `RecordCodec` envelope, `PersistenceService`, NVS / host-file / memory adapters |
 | Dialog | `pixelroot32-dialog` | Branching dialogue and choice menus: `DialogRunner` headless state machine, `DialogLine`/`DialogChoice` flash scripts, `DialogBox` panel, speaker portraits, selection caret |
 
 For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`. For creating a new game project from scratch (PlatformIO scaffold, platform entry points, minimal scene), see `pixelroot32-game-scaffold`.

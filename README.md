@@ -44,6 +44,8 @@ The suite is divided into specific engine subsystems. Your AI will dynamically l
 | `pixelroot32-entity-actor` | How to structure the game objects using the Godot-inspired node hierarchy. |
 | `pixelroot32-gameplay-framework` | How to assemble grid-locked movement, screen-by-screen rooms, state machines, and object pools from the `pixelroot32::gameplay` primitives. |
 | `pixelroot32-dialog` | How to write branching dialogue, choice menus, paged text boxes and speaker portraits with the headless `DialogRunner` and the `DialogBox` panel. |
+| `pixelroot32-networking` | How to add router-free ESP-NOW multiplayer with `NetSession` peer discovery and reliable delivery, `NetCounter` shared state, and the `LoopbackTransport` for deterministic native tests (opt-in `PIXELROOT32_ENABLE_NETWORKING`). |
+| `pixelroot32-persistence` | How to store settings and save slots through `PersistenceService` with typed `StoreResult` errors, the `RecordCodec` schema/CRC envelope, and NVS, host-file or in-memory stores (opt-in `PIXELROOT32_ENABLE_PERSISTENCE`). |
 | `pixelroot32-testing` | How to generate Unity framework unit tests using Mocks for isolated validation. |
 | `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, `-fno-exceptions` enforcement, and Doxygen documentation standards. |
 | `pixelroot32-game-scaffold` | How to scaffold a new PlatformIO project: `platformio.ini`, base build flags, native/ESP32 platform entry points, and a minimal `Scene`. |
