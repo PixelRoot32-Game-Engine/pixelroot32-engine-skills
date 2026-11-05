@@ -1,6 +1,6 @@
 ---
 name: pixelroot32-audio
-description: NES-style 8-voice audio subsystem (4 music + 4 SFX voice partition) with 5 wave types (Pulse, Triangle, Noise, Sine, Saw), ADSR+LFO envelopes, Linear/Exponential frequency sweeps, duty/pitch breakpoint tables, looping SFX, SFX bank playback, Q15 no-FPU path, SPSC command queue, multi-track sequencer, and MusicPlayer. Use when implementing sound effects, music playback, or audio pipeline configuration.
+description: NES-style 8-voice audio subsystem (4 music + 4 SFX voice partition) with 5 wave types (Pulse, Triangle, Noise, Sine, Saw), ADSR+LFO envelopes, Linear/Exponential frequency sweeps, duty/pitch breakpoint tables, looping SFX, SFX bank playback, Q15 no-FPU path, Legacy/Nes/Hybrid sound profiles, configurable render block (512/1024 samples) with underrun counters, SPSC command queue, multi-track sequencer, and MusicPlayer. Use when implementing sound effects, music playback, sound profiles, or audio pipeline configuration (block size, latency, sample rate).
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
@@ -9,12 +9,12 @@ metadata:
   module: core
   feature_gate: PIXELROOT32_ENABLE_AUDIO
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.14.0"
 ---
 
 ## Overview
 
-PixelRoot32 provides an NES-style audio subsystem with an 8-voice pool partitioned 4+4 (slots 0–3 for sequencer music tracks, slots 4–7 for SFX and percussion), 5 wave types, per-voice ADSR envelopes, LFO modulation, Linear/Exponential frequency sweeps, duty/pitch breakpoint automation, looping SFX, and a multi-track music sequencer. The architecture separates synthesis (`ApuCore`) from scheduling (`AudioScheduler`) and exposes a facade (`AudioEngine`) for game code. A lock-free SPSC command queue mediates between game and audio threads.
+PixelRoot32 provides an NES-style audio subsystem with an 8-voice pool partitioned 4+4 (slots 0–3 for sequencer music tracks, slots 4–7 for SFX and percussion), 5 wave types, per-voice ADSR envelopes, LFO modulation, Linear/Exponential frequency sweeps, duty/pitch breakpoint automation, looping SFX, and a multi-track music sequencer. The architecture separates synthesis (`ApuCore`) from scheduling (`AudioScheduler`) and exposes a facade (`AudioEngine`) for game code. A lock-free SPSC command queue mediates between game and audio threads. Synthesis runs in render blocks of `AudioConfig::blockSize` samples (512 on FPU targets, 1024 without FPU), and a selectable sound profile (`Legacy` default, `Nes`, `Hybrid`) sets the character of every voice.
 
 ## Key APIs
 
@@ -25,12 +25,17 @@ PixelRoot32 provides an NES-style audio subsystem with an 8-voice pool partition
 **Feature gate**: `PIXELROOT32_ENABLE_AUDIO`
 
 ```cpp
+// Header: include/audio/AudioConfig.h
+// inline constexpr int PR32_AUDIO_MAX_BLOCK_SAMPLES = 1024;
 // struct AudioConfig { AudioBackend* backend = nullptr; int sampleRate = 22050;
-//                      int blockSize = platforms::config::HasFPU ? 256 : 128; };
+//                      int blockSize = platforms::config::HasFPU ? 512 : 1024;
+//                      PostMixMonoFn postMixMono = nullptr; void* postMixUser = nullptr; };
 //   AudioConfig(AudioBackend* backend = nullptr, int sampleRate = 22050,
-//               int blockSize = platforms::config::HasFPU ? 256 : 128);
+//               int blockSize = platforms::config::HasFPU ? 512 : 1024);
 // `backend` is a POINTER and may be nullptr for headless configs.
-// blockSize must be a multiple of 128 (static_assert, I2S alignment).
+// blockSize is the RENDER UNIT: a positive multiple of 128, at most
+// PR32_AUDIO_MAX_BLOCK_SAMPLES. It is validated at runtime in the backend /
+// scheduler init(), not by the static_assert (which only checks the defaults).
 AudioConfig config(&backend, 22050);  // pass the ADDRESS of the backend
 
 // Single constructor:
@@ -55,6 +60,12 @@ engine.setMasterBitcrush(4);  // 4-bit reduction
 // Music transport
 bool playing = engine.isMusicPlaying();
 bool paused = engine.isMusicPaused();
+
+// Configured render block (config is private; backends read it in init())
+int block = engine.getBlockSize();
+
+// Scheduler access (diagnostics, or ApuCore calls ON THE AUDIO THREAD)
+AudioScheduler* sched = engine.getScheduler();  // nullptr if not set
 ```
 
 ### ApuCore (Synthesis)
@@ -66,6 +77,8 @@ bool paused = engine.isMusicPaused();
 Since engine **1.8.0** the APU core no longer lives in the engine: it was extracted to the external library `gperez88/PixelRoot32-APU` (`library.json` declares `"gperez88/PixelRoot32-APU": "^2.0.0"`). `include/audio/ApuCore.h` is now a re-export shim containing only `#pragma once` + `#include <pixelroot32/apu/ApuCore.h>`, so **existing `#include "audio/ApuCore.h"` keeps working unchanged**. NEW code should include `<pixelroot32/apu/ApuCore.h>` directly.
 
 The namespace, the class-scoped constants and `ApuCore::ProfileEntry` are unchanged — only the physical header location moved.
+
+Engine 1.14.0 still declares `^2.0.0` (in both `library.json` and `platformio.ini`). Sound profiles (`SoundProfile`, `SET_SOUND_PROFILE`, `setSoundProfile()`) shipped in APU **2.1.0**; the range resolves to the current 2.x release (2.2.0), but a project that pins or locks APU 2.0.0 does not have them.
 
 ```cpp
 ApuCore apu;
@@ -84,6 +97,11 @@ apu.submitCommand(cmd);
 
 // Generate samples (called by scheduler)
 apu.generateSamples(stream, length);
+
+// Sound profile — AUDIO THREAD ONLY (not safe concurrently with rendering);
+// from the game thread use AudioCommandType::SET_SOUND_PROFILE instead.
+apu.setSoundProfile(SoundProfile::Hybrid);
+SoundProfile p = apu.getSoundProfile();  // safe from any thread; Legacy until set
 
 // Music sequencer
 apu.setSequencerNoteLimit(32);
@@ -174,7 +192,7 @@ player.setBPM(180.0f);
 **Namespace**: `pixelroot32::audio`
 
 ```cpp
-AudioCommandQueue queue;  // Capacity: 128 entries (~8 KB at default capacity; configurable via AUDIO_COMMAND_QUEUE_CAPACITY)
+AudioCommandQueue queue;  // CAPACITY 64 (63 usable: one slot stays free); AUDIO_COMMAND_QUEUE_CAPACITY accepts 32-64 (static_assert)
 
 // Producer (game thread)
 queue.enqueue(cmd);  // Returns false if full
@@ -368,6 +386,66 @@ Note helpers: `makeNote(preset, note, octave, duration)`, `makeNote(preset, note
 - On the percussion track, only **`Rest` + noise preset** counts as a drum hit; a plain `Rest` (no preset) remains silence and a melodic `Rest` is a track-scoped note-off (it only releases that track's voice).
 - When `tempoFactor > 1` truncates a note to 0 ticks, the sequencer clamps to 1 tick minimum.
 
+## Sound Profiles
+
+**Header**: `<pixelroot32/apu/AudioTypes.h>` (`enum class SoundProfile : uint8_t { Legacy = 0, Nes = 1, Hybrid = 2 }`, `AudioCommandType::SET_SOUND_PROFILE`, `AudioCommand::soundProfile`); re-exported by `include/audio/AudioTypes.h`
+**Namespace**: `pixelroot32::audio`
+**Requires**: PixelRoot32-APU >= 2.1.0
+
+| Profile | What changes |
+|---------|--------------|
+| `Legacy` (default) | Nothing: the historical sound. A **frozen contract** — its rendered PCM is pinned by immutable goldens and does not change between releases |
+| `Nes` | NES-weighted mix, unipolar noise on the NES period LUT, PULSE duty snapped to the four NES steps, and an output chain on the summed mix: HPF 90 Hz → HPF 440 Hz → Butterworth LPF near 14 kHz |
+| `Hybrid` | The `Nes` character plus an exponential DECAY/RELEASE envelope and a band-limited SAW read from a mipmap |
+
+```cpp
+// Game thread — the documented path; queued like any other command
+AudioCommand cmd{};
+cmd.type = AudioCommandType::SET_SOUND_PROFILE;
+cmd.soundProfile = static_cast<uint8_t>(SoundProfile::Nes);  // uint8_t field
+engine.submitCommand(cmd);
+
+// Audio thread only — identical resulting state
+engine.getScheduler()->getApuCore().setSoundProfile(SoundProfile::Nes);
+```
+
+- **`init()` does not reset the profile**: a stream restart keeps the caller's choice.
+- **Level is matched, peaks are not**: `Nes` and `Hybrid` carry a level trim matched on crest-weighted loudness against `Legacy`, but their transients are hotter (~37 % / ~41 % of full scale on the APU's canonical track vs 18 % for `Legacy`; ~52 % / ~51 % vs 36 % on a dense mix). Re-check the master level when mixing by peak.
+- **`Nes` and `Hybrid` render the integer core on every platform**, FPU targets included — that is what makes them identical across targets, and their CPU cost is the integer cost.
+- **Only `Hybrid` band-limits SAW**; `Legacy` and `Nes` keep the ideal ramp and its aliasing. `SINE` is identical on every profile.
+- **An explicit `setHpfCutoffHz()` wins**: it suppresses the `Nes`/`Hybrid` output chain *and* its level trim, putting the output back on the historical one-pole.
+- `examples/apu_profiles` renders the same track under each profile.
+
+## Render Block, Latency and Underruns
+
+`AudioConfig::blockSize` is the **render unit**: the backend asks `AudioEngine::generateSamples()` for exactly that many samples per iteration. The I2S and DAC backends (in their `init()`) and `NativeAudioScheduler::init()` validate it — a positive multiple of 128, at most `PR32_AUDIO_MAX_BLOCK_SAMPLES` (1024) — and **reject an invalid block with an error log** instead of rendering a wrong-sized buffer. The render buffer is a member of that maximum size, not a stack array.
+
+The DMA depth is derived from the block, never hard-coded: `dma_buf_len = 128` (fixed) and `dma_buf_count = clamp(blockSize / 128, 2, 8)`.
+
+| Platform | `blockSize` | DMA ring | Latency @22 050 Hz | Latency @32 000 Hz |
+|---|---|---|---|---|
+| Dual-core (FPU) | 512 | 128 × 4 | 23.2 ms | 16 ms |
+| Single-core (no FPU) | 1024 | 128 × 8 | 46.4 ms | 32 ms |
+
+The block is also the **command granularity**: a queued command may be applied up to one block later than it was submitted.
+
+### ESP32 backend counters
+
+**Headers**: `include/drivers/esp32/ESP32_I2S_AudioBackend.h`, `include/drivers/esp32/ESP32_DAC_AudioBackend.h`
+**Namespace**: `pixelroot32::drivers::esp32`
+
+```cpp
+// Both backends (readable from any thread; the audio task owns the writes)
+uint32_t underruns = i2sBackend.getUnderrunCount(); // write barely waited (< budget/10), failed, or came back short
+uint32_t worstBlk  = i2sBackend.getWorstBlockUs();  // worst whole iteration (render + write), µs
+uint32_t worstWr   = i2sBackend.getWorstWriteUs();  // worst i2s_write blocking time, µs
+
+// ESP32_I2S_AudioBackend only — the DAC backend has no render counter
+uint32_t worstRnd  = i2sBackend.getWorstRenderUs(); // worst synthesis time per block, µs
+```
+
+The first 10 iterations are not counted (they fill the ring). `tools/apu_underrun_probe` is the on-board gate: it runs a real `AudioEngine` on `ESP32_I2S_AudioBackend` with eight voices and reports these counters at the board's own block size.
+
 ## Composition Patterns
 
 ### Sound effect on collision
@@ -400,8 +478,10 @@ Scene::update(dt):
 
 - **No FPU (ESP32-C3 RISC-V)**: Use Q15 fixed-point path — `EnvelopeState`, `LfoState`, `AudioChannel` have Q15/Q32 mirrors for all hot-path math. The integer/Q15 render path is ~4.4 dB louder than the float path — rebalance volumes when moving between FPU and no-FPU targets.
 - **IRAM_ATTR**: Mark `generateSamples()` and hot synthesis functions with `IRAM_ATTR` when using I2S DMA to avoid flash contention.
-- **Block size**: 128 samples for no-FPU platforms (`platforms::config::HasFPU` controls default).
-- **SPSC queue**: `AudioCommandQueue` capacity defaults to 128 entries (~8 KB). Increase via `AUDIO_COMMAND_QUEUE_CAPACITY` for high-throughput.
+- **Block size**: default 512 samples on FPU platforms, 1024 on no-FPU platforms (`platforms::config::HasFPU` selects the default). Hard ceiling `PR32_AUDIO_MAX_BLOCK_SAMPLES` = 1024; must be a positive multiple of 128. Smaller blocks lower latency but raise the wake-up rate.
+- **Sample rate**: 22 050 Hz is the only rate supported on every target. 32 000 Hz is available only where p99 stays under half the render block: on `esp32-c3-devkitm-1` the `Nes` and `Hybrid` profiles measure 50.1 % and 50.9 % of the block at eight voices, so 32 000 Hz is **unsupported for `Nes`/`Hybrid` on that board** (`Legacy` keeps it at 48.7 %). The APU has no per-target policy — the consumer enforces this envelope.
+- **Backend footprint**: `ESP32_I2S_AudioBackend` and `ESP32_DAC_AudioBackend` are ~2 KB each on `esp32dev` (1024-sample render buffer + counters). Give the backend file scope or heap, never a local inside a small-stack task.
+- **SPSC queue**: `AudioCommandQueue` capacity defaults to 64 entries (63 usable). `AUDIO_COMMAND_QUEUE_CAPACITY` accepts only 32–64 — the ceiling is a RAM budget, not throughput; values above 64 fail the `static_assert`.
 - **Sequencer note limit**: Default 32 notes/frame. Set via `setSequencerNoteLimit()` or `AUDIO_SEQUENCER_MAX_NOTES` to prevent audio starvation.
 - **Blocking**: Never allocate or block in `generateSamples()`. All synthesis is pre-computed.
 
@@ -410,7 +490,7 @@ Scene::update(dt):
 1. **Preset pointers must outlive usage**: `AudioEvent::preset`, `MusicNote::preset`, and `MusicTrack::notes` must point to `static` or `constexpr` data — stack-local temporaries will dangle.
 2. **SPSC queue drops**: When the queue is full, the *newest* command is dropped (not the oldest). Monitor `getDroppedCommands()` for backpressure.
 3. **Noise channel**: `frequency` sets the LFSR clock rate, not pitch. Shorter `noisePeriod` → lower pitch. `noiseLfsrShort=true` gives a metallic 93-step LFSR (`noiseShortMode` is its deprecated alias).
-4. **Block size alignment**: Must be a multiple of 128 for I2S DMA alignment (compile-time assertion).
+4. **Block size is validated at runtime, not compile time**: the `static_assert` in `AudioConfig.h` only checks the *defaults*. A custom `blockSize` that is not a positive multiple of 128 or exceeds 1024 is rejected in the backend/scheduler `init()` with an error log — the build succeeds and there is simply no audio. Check the log after changing it.
 5. **Bitcrush**: `setMasterBitcrush(bits)` with bits 0 disables the effect. Values 1-15 re-quantize the final int16 output.
 6. **MusicTrack lifetime**: The `MusicTrack` and its `MusicNote` array must remain in scope for the duration of playback — the sequencer references them by pointer.
 7. **Profile ring buffer**: `PROFILE_RING_SIZE` is 64 entries. Get-and-reset semantics: each call drains all pending entries.
@@ -421,6 +501,11 @@ Scene::update(dt):
 12. **The APU is an external dependency**: since engine 1.8.0 the synthesis core ships as `gperez88/PixelRoot32-APU@^2.0.0`. A game's `platformio.ini` must resolve that dependency (`lib_deps`) or every `audio/ApuCore.h` shim include fails to compile.
 13. **`preset` is field 7, NOT the last field**: it sits between `noisePeriod` (6) and `sweepEndHz` (8). A positional brace-init that trails `preset` at the end — `{type, frequency, duration, volume, duty, &INSTR_X}` — silently assigns the preset pointer to `noisePeriod`'s slot (or fails to compile), and omitting `noisePeriod` while positionally initializing `preset` shifts every field after it. Both produce **silently wrong audio, not a build error**. Past `duty`, prefer named assignment (`event.preset = &INSTR_PULSE_BASS;`). The correct positional form is `{type, frequency, duration, volume, duty, 0, &INSTR_PULSE_BASS}`.
 14. **Field order is `frequency, duration, volume`** — not `frequency, volume, duration`. Swapping 3 and 4 compiles cleanly (both `float`) and yields a note of the wrong length at the wrong loudness.
+15. **Commands land up to one block late**: the render block is the command granularity, so at the 1024-sample no-FPU default a `playEvent` can start up to ~46 ms after submission at 22 050 Hz. Do not assume sample-exact sync between game logic and audio.
+16. **`setSoundProfile()` is not game-thread safe**: it mutates state the renderer reads. From game code, submit `SET_SOUND_PROFILE`; call `setSoundProfile()` only on the audio thread.
+17. **A profile switch raises peaks**: `Nes`/`Hybrid` match loudness but not peak level — a mix tuned to clip-free peaks under `Legacy` may clip after switching.
+18. **`ApuCore::setHpfCutoffHz()` disables the profile output chain**: under `Nes`/`Hybrid`, an explicit call drops the NES filter chain and its level trim (historical one-pole, level included). Do not call it if you want the profile's output stage; like other direct setters it is not safe concurrently with rendering.
+19. **Native teardown does not call `SDL_Quit()`** (since 1.14.0, issue #273): `SDL2_AudioBackend` acquires and releases only `SDL_INIT_AUDIO` (and skips closing the device if the audio subsystem is already gone); SDL's global state is reclaimed at process exit. Other SDL subsystems an app initialises (game controller, joystick) are not torn down by the engine. Under the documented declaration order (backend declared before `Engine`) the SDL audio callback can still run in the short window between `~Engine` and `~SDL2_AudioBackend` — see `docs/architecture/layer-drivers.md`.
 
 ## Common Patterns
 
@@ -470,3 +555,7 @@ engine.playEvent(fall);
 ## Agent Constraints
 - **Feature Gate:** ALWAYS wrap AudioEngine usage in `#if PIXELROOT32_ENABLE_AUDIO`.
 - **Testing:** If you modify audio components, YOU MUST read `pixelroot32-testing` and update/create the corresponding unit tests using Mocks.
+- **Block size:** NEVER set `AudioConfig::blockSize` to a value that is not a positive multiple of 128 or exceeds `PR32_AUDIO_MAX_BLOCK_SAMPLES` (1024). Leave the default unless you are deliberately trading latency for wake-ups.
+- **Sound profile:** Switch profiles from game code ONLY via `AudioCommandType::SET_SOUND_PROFILE`; NEVER call `ApuCore::setSoundProfile()` from the game thread. Leave `Legacy` as the default unless the user asks for a different character.
+- **Sample rate:** Use 22 050 Hz unless the target is known to support more; NEVER combine 32 000 Hz with `Nes`/`Hybrid` on ESP32-C3.
+- **Native shutdown:** NEVER add `SDL_Quit()` calls to engine drivers or teardown code — each native driver owns only the SDL subsystem it initialised.
