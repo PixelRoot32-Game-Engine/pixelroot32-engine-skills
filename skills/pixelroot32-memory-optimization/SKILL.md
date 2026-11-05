@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: esp32
-  engine_version: "1.12.0"
+  engine_version: "1.14.0"
 ---
 
 ## Overview
@@ -44,6 +44,29 @@ actually reachable now (previously always fell back to 30); `Entity` grows 4 B o
 `DEPTH_SORT=1` (256 B at 64 entities); the executed projected-tilemap path measured
 +1,744 B flash / +80 B SRAM on `esp32dev` (`iso_dungeon`, now in Demo-Projects `graphics/`).
 
+**Opt-in modules (1.13/1.14) — cost of *enabling* them.** Both default to `0` and contribute
+no symbols or Engine bytes when off. `scripts/measure_modular_size.py` measures them the other
+way round (`measure_networking` / `measure_persistence` minus `measure_full`), on `esp32dev`
+(engine commit `f5cd687`):
+
+| Flag Enabled | RAM Cost | Flash Cost |
+|--------------|----------|------------|
+| `PIXELROOT32_ENABLE_NETWORKING=1` | +1,800 B | +4,836 B |
+| `PIXELROOT32_ENABLE_PERSISTENCE=1` | +176 B | +1,048 B |
+
+These rows exclude the platform backends on purpose. **`ESP32EspNowTransport` alone pulls the
+whole Wi-Fi/lwIP stack (~580 KB flash)** — budget that separately for any real ESP-NOW game.
+Persistence static RAM on the ESP32 (CHANGELOG 1.14.0): 16 B for `PersistenceService`, 24 B per
+NVS key-value store. Networking RAM scales with the `PIXELROOT32_NET_*` capacities (peer table
+`PIXELROOT32_NET_MAX_PEERS` default 4, payload `PIXELROOT32_NET_MAX_PAYLOAD` default 64, RX/TX
+queues default 8 each) — see `pixelroot32-networking`.
+
+**Audio render buffers (1.14.0).** `AudioConfig::blockSize` now defaults to **512 (FPU) / 1024
+(no FPU)** samples (was 256/128). The render buffer is no longer a stack array: the I2S, DAC
+and native backends each hold an `int16_t renderBuffer_[PR32_AUDIO_MAX_BLOCK_SAMPLES]` member
+(1024 samples = 2,048 B static, whatever the configured block). The `sizeof(ESP32AudioScheduler)`
+figure below predates this change — re-measure before budgeting audio tightly.
+
 **Audio is the biggest RAM win, not physics.** The dominant cost is the scheduler's own
 buffers — the probe reports `sizeof(ESP32AudioScheduler) = 15,968` B, next to
 `sizeof(CollisionSystem) = 4,884`, `sizeof(ParticleEmitter) = 1,264`, `sizeof(UIManager) = 96`.
@@ -77,13 +100,15 @@ preprocessor context.
 `_SPATIAL_QUERY`, `_DEPTH_SORT`, `_GAMEPLAY_STATE_MACHINE`, `_GAMEPLAY_OBJECT_POOL`,
 `_GAMEPLAY_GRID_SPACE`, `_GAMEPLAY_ROOM`, `_CAMERA_TWEEN`, `_PROJECTION`, `_TILEMAP_PROJECTION`,
 `PIXELROOT32_ENABLE_TOUCH`, `_DIRTY_REGIONS`, `_DIRTY_REGION_PROFILING`,
-`PIXELROOT32_TFT_12BIT_COLOR`, `_DIALOG`, `_FONT_LATIN1`
+`PIXELROOT32_TFT_12BIT_COLOR`, `_DIALOG`, `_FONT_LATIN1`, `_NETWORKING` (ESP32 and native
+only), `_PERSISTENCE`
 
 **`#ifdef`-tested — undefined by default, therefore effectively off.** A value of `0` still
 enables them; define or omit, never `=0`:
 
 `PIXELROOT32_ENABLE_2BPP_SPRITES`, `_4BPP_SPRITES`, `_SCENE_ARENA`, `_TILE_ANIMATIONS`,
-`_PROFILING`, `_ENABLE_DEBUG_OVERLAY`
+`_PROFILING`, `_ENABLE_DEBUG_OVERLAY`, `PIXELROOT32_DRAIN_PRESENT` (closes the TFT frame
+transfer at the end of `present()`; costs the present/next-frame overlap, not RAM)
 
 **Driver / DMA knobs:** `PIXELROOT32_TFT_ESPI_LINES_PER_BLOCK` (default 60),
 `PIXELROOT32_TFT_ESPI_LINES_PER_BLOCK_FALLBACK` (default 30).
@@ -99,6 +124,7 @@ enables them; define or omit, never `=0`:
 | `_INTERACTION_TRIGGERS` or `_SPATIAL_QUERY` **require** `PIXELROOT32_ENABLE_PHYSICS=1` | `:193-194` |
 | `_TILEMAP_PROJECTION` **requires** `PIXELROOT32_ENABLE_PROJECTION` | `:200-201` |
 | `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is now a hard `#error` tripwire | `:137-138` |
+| `PIXELROOT32_ENABLE_NETWORKING=1` is **only supported on ESP32 and native targets** | `:335-336` |
 
 There is **no** `EnableTilemapProjection` constant in `pixelroot32::platforms::config` —
 `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` is preprocessor-only and has no type-safe mirror.
@@ -316,6 +342,8 @@ For memory patterns specific to each subsystem, refer to the specialized skills:
 | Particles | `pixelroot32-particles` | Emitter pool, preset configs |
 | Projection | `pixelroot32-projection` | `_PROJECTION` / `_TILEMAP_PROJECTION` default 0; `_TILEMAP_PROJECTION` requires `_PROJECTION` |
 | Gameplay framework | `pixelroot32-gameplay-framework` | All `_GAMEPLAY_*` gates default 0; `_INTERACTION_TRIGGERS` / `_SPATIAL_QUERY` require `_PHYSICS=1` |
+| Networking | `pixelroot32-networking` | `_NETWORKING` default 0; fixed peer table and queues sized by `PIXELROOT32_NET_*`; ESP-NOW backend pulls ~580 KB Wi-Fi/lwIP flash |
+| Persistence | `pixelroot32-persistence` | `_PERSISTENCE` default 0; capacities are template/constructor arguments (no limit macros); reads take caller-owned buffers |
 
 ## Agent Constraints
 - **Strict Adherence:** The recommendations here are ABSOLUTE rules for Agents.

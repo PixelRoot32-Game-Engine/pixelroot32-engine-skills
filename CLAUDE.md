@@ -36,7 +36,7 @@ metadata:
 
 `metadata.engine_version` is mandatory on every skill. The catalog previously carried no engine-version anchor at all — nothing recorded which engine a skill had last been checked against — which is exactly why a two-minor-version drift went unnoticed. The format is the engine version string, with `+unreleased` appended when the skill also documents APIs that are on `main` but not yet in a tagged release (e.g. `"1.9.0+unreleased"`). Update it whenever a skill is re-verified against a newer engine, and only then: it records verification, not intent.
 
-Engine-subsystem skills (audio, physics, particles, camera2d, sprite-renderer, scene-manager, touch-input, ui-system, entity-actor, projection, gameplay-framework) follow a canonical section order — keep it when editing or adding skills:
+Engine-subsystem skills (audio, physics, particles, camera2d, sprite-renderer, scene-manager, touch-input, ui-system, entity-actor, projection, gameplay-framework, networking, persistence) follow a canonical section order — keep it when editing or adding skills:
 
 1. `## Overview`
 2. `## Key APIs` — per class: **Header** path, **Namespace**, **Feature gate**, then a compact C++ usage snippet
@@ -57,7 +57,7 @@ All skill content documents (and must stay consistent with) the engine's core pi
   - Scoped to the loop on purpose. **UI layout containers are the documented exception**: `UILayout` stores children in `std::vector<UIElement*>` (`include/graphics/ui/UILayout.h:141`) and `UIAnchorLayout` adds a second `std::vector<std::pair<UIElement*, Anchor>>` — heap-backed and unbounded, with no max-children constant. The rule the skills encode is therefore *build the layout tree once in `Scene::init()`/`initUI()` and never add or remove layout children per frame*. Do not "correct" `pixelroot32-ui-system` back into claiming the engine has no `std::vector` anywhere; that claim is false and was already disproved by a code read.
 - **Fixed-point math**: `toScalar()` rather than `float` for determinism on non-FPU chips (e.g. ESP32-C3).
 - **Feature gates**: subsystems are wrapped in `#if PIXELROOT32_ENABLE_*` macros; skills state the gate for each API they document.
-- **No exceptions/RTTI** (`-fno-exceptions`); C++17; PascalCase types, camelCase methods/members, no `m_` prefixes; public namespaces are `pixelroot32::{core,graphics,graphics::ui,input,physics,math,audio,gameplay}`.
+- **No exceptions/RTTI** (`-fno-exceptions`); C++17; PascalCase types, camelCase methods/members, no `m_` prefixes; public namespaces are `pixelroot32::{core,graphics,graphics::ui,input,physics,math,audio,gameplay,networking,persistence}`.
 - **Event consumption**: touch/UI events must call `event.consume()` to prevent input bleeding into game logic.
 - Hard limits are contractual (e.g. 50 particles per emitter, 8 audio voices) — when documenting APIs, keep the stated limits, header paths, and namespaces exact; these skills exist specifically to stop agents from hallucinating APIs.
 
