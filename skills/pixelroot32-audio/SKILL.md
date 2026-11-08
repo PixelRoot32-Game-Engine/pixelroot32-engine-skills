@@ -9,7 +9,7 @@ metadata:
   module: core
   feature_gate: PIXELROOT32_ENABLE_AUDIO
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
@@ -74,11 +74,11 @@ AudioScheduler* sched = engine.getScheduler();  // nullptr if not set
 **Legacy header**: `include/audio/ApuCore.h` — transitional re-export shim
 **Namespace**: `pixelroot32::audio` (unchanged across the boundary)
 
-Since engine **1.8.0** the APU core no longer lives in the engine: it was extracted to the external library `gperez88/PixelRoot32-APU` (`library.json` declares `"gperez88/PixelRoot32-APU": "^2.0.0"`). `include/audio/ApuCore.h` is now a re-export shim containing only `#pragma once` + `#include <pixelroot32/apu/ApuCore.h>`, so **existing `#include "audio/ApuCore.h"` keeps working unchanged**. NEW code should include `<pixelroot32/apu/ApuCore.h>` directly.
+Since engine **1.8.0** the APU core no longer lives in the engine: it was extracted to the external library `gperez88/PixelRoot32-APU` (`library.json` declares `"gperez88/PixelRoot32-APU": "^2.3.0"`). `include/audio/ApuCore.h` is now a re-export shim containing only `#pragma once` + `#include <pixelroot32/apu/ApuCore.h>`, so **existing `#include "audio/ApuCore.h"` keeps working unchanged**. NEW code should include `<pixelroot32/apu/ApuCore.h>` directly.
 
 The namespace, the class-scoped constants and `ApuCore::ProfileEntry` are unchanged — only the physical header location moved.
 
-Engine 1.14.0 still declares `^2.0.0` (in both `library.json` and `platformio.ini`). Sound profiles (`SoundProfile`, `SET_SOUND_PROFILE`, `setSoundProfile()`) shipped in APU **2.1.0**; the range resolves to the current 2.x release (2.2.0), but a project that pins or locks APU 2.0.0 does not have them.
+Since engine **1.14.1** both `library.json` and `platformio.ini` declare `gperez88/PixelRoot32-APU@^2.3.0`. The profile set is version-gated: `Nes` shipped in APU **2.1.0**, `Famicom` in **2.3.0**, and `Hybrid` is a `[[deprecated]]` alias of `Famicom` there. A project that pins or locks an older 2.x loses whichever profile it predates.
 
 ```cpp
 ApuCore apu;
@@ -100,7 +100,7 @@ apu.generateSamples(stream, length);
 
 // Sound profile — AUDIO THREAD ONLY (not safe concurrently with rendering);
 // from the game thread use AudioCommandType::SET_SOUND_PROFILE instead.
-apu.setSoundProfile(SoundProfile::Hybrid);
+apu.setSoundProfile(SoundProfile::Famicom);  // Legacy | Nes | Famicom
 SoundProfile p = apu.getSoundProfile();  // safe from any thread; Legacy until set
 
 // Music sequencer
@@ -119,7 +119,7 @@ apu.getAndResetProfileStats(stats, count);
 
 Know which side of the 1.8.0 boundary a symbol lives on before including it.
 
-**Re-export shims in `include/audio/` (real definitions in `gperez88/PixelRoot32-APU@^2.0.0`)** — each is only a comment + `#pragma once` + one include:
+**Re-export shims in `include/audio/` (real definitions in `gperez88/PixelRoot32-APU@^2.3.0`)** - each is only a comment + `#pragma once` + one include:
 
 | Legacy shim | Re-exports |
 |---|---|
@@ -388,33 +388,37 @@ Note helpers: `makeNote(preset, note, octave, duration)`, `makeNote(preset, note
 
 ## Sound Profiles
 
-**Header**: `<pixelroot32/apu/AudioTypes.h>` (`enum class SoundProfile : uint8_t { Legacy = 0, Nes = 1, Hybrid = 2 }`, `AudioCommandType::SET_SOUND_PROFILE`, `AudioCommand::soundProfile`); re-exported by `include/audio/AudioTypes.h`
+**Header**: `<pixelroot32/apu/AudioTypes.h>` (`enum class SoundProfile : uint8_t { Legacy = 0, Nes = 1, Famicom = 2, Hybrid [[deprecated("use SoundProfile::Famicom")]] = 2 }`, `AudioCommandType::SET_SOUND_PROFILE`, `AudioCommand::soundProfile`); re-exported by `include/audio/AudioTypes.h`
 **Namespace**: `pixelroot32::audio`
-**Requires**: PixelRoot32-APU >= 2.1.0
+**Requires**: PixelRoot32-APU >= 2.1.0 for `Nes`, >= 2.3.0 for `Famicom` (the engine declares `^2.3.0` since 1.14.1)
 
 | Profile | What changes |
 |---------|--------------|
-| `Legacy` (default) | Nothing: the historical sound. A **frozen contract** — its rendered PCM is pinned by immutable goldens and does not change between releases |
-| `Nes` | NES-weighted mix, unipolar noise on the NES period LUT, PULSE duty snapped to the four NES steps, and an output chain on the summed mix: HPF 90 Hz → HPF 440 Hz → Butterworth LPF near 14 kHz |
-| `Hybrid` | The `Nes` character plus an exponential DECAY/RELEASE envelope and a band-limited SAW read from a mipmap |
+| `Legacy` (default) | Nothing: the historical rational mix curve, bipolar noise, continuous PULSE duty, ideal SAW ramp, single-pole HPF. A **frozen contract** — its rendered PCM is pinned by immutable goldens and does not change between releases |
+| `Nes` | Linear envelope plus the 4-bit `nesEnvelope`, NES-weighted mix, unipolar noise on the NES period LUT, PULSE duty snapped to the four NES steps, ideal SAW ramp, and the front-loading NES output stage: HPF 90 Hz → HPF 440 Hz → Butterworth LPF at `min(14 kHz, 0.45·fs)`, trim **+1.10 dB** |
+| `Famicom` | The **`Nes`** character with the Famicom output stage instead: a single HPF 37 Hz → the same LPF, trim **−0.27 dB**. It keeps the bass and kick fundamentals the NES chain removes (at 65 Hz the APU measures −1.2 dB against −21.1 dB for `Nes`) |
+
+**`Famicom` is value 2 — the value earlier APU releases called `Hybrid`.** `SoundProfile::Hybrid` still compiles as a `[[deprecated]]` alias (same wire value, so a serialised `2` keeps working), but since APU 2.3.0 value 2 *sounds different*: decays are linear, SAW is the ideal ramp, the low end is kept and the master level is lower. Replace `Hybrid` with `Famicom` and re-check by ear anything tuned for the old `Hybrid`.
 
 ```cpp
 // Game thread — the documented path; queued like any other command
 AudioCommand cmd{};
 cmd.type = AudioCommandType::SET_SOUND_PROFILE;
-cmd.soundProfile = static_cast<uint8_t>(SoundProfile::Nes);  // uint8_t field
+cmd.soundProfile = static_cast<uint8_t>(SoundProfile::Famicom);  // uint8_t field
 engine.submitCommand(cmd);
 
 // Audio thread only — identical resulting state
-engine.getScheduler()->getApuCore().setSoundProfile(SoundProfile::Nes);
+engine.getScheduler()->getApuCore().setSoundProfile(SoundProfile::Famicom);
 ```
 
 - **`init()` does not reset the profile**: a stream restart keeps the caller's choice.
-- **Level is matched, peaks are not**: `Nes` and `Hybrid` carry a level trim matched on crest-weighted loudness against `Legacy`, but their transients are hotter (~37 % / ~41 % of full scale on the APU's canonical track vs 18 % for `Legacy`; ~52 % / ~51 % vs 36 % on a dense mix). Re-check the master level when mixing by peak.
-- **`Nes` and `Hybrid` render the integer core on every platform**, FPU targets included — that is what makes them identical across targets, and their CPU cost is the integer cost.
-- **Only `Hybrid` band-limits SAW**; `Legacy` and `Nes` keep the ideal ramp and its aliasing. `SINE` is identical on every profile.
-- **An explicit `setHpfCutoffHz()` wins**: it suppresses the `Nes`/`Hybrid` output chain *and* its level trim, putting the output back on the historical one-pole.
-- `examples/apu_profiles` renders the same track under each profile.
+- **Level is matched, peaks are not**: `Nes` and `Famicom` carry a level trim matched on crest-weighted loudness against `Legacy`, but their transients are hotter — ~37 % (`Nes`) and ~20 % (`Famicom`) of full scale on the APU's canonical track against 18 % for `Legacy`, and ~52 % (`Nes`) vs 36 % on a dense mix (`Famicom` has not been measured on a dense mix). Re-check the master level when mixing by peak.
+- **`Nes` and `Famicom` render the integer core on every platform**, FPU targets included — that is what makes them identical across targets, and their CPU cost is the integer cost.
+- **Every profile renders the ideal SAW ramp**, aliasing included; the NES profiles keep it on purpose because their character reproduces the NES's own artefacts. The APU's band-limited SAW is dormant. `SINE` is identical on every profile.
+- **The default envelope is linear under every profile.** A note gets the exponential DECAY/RELEASE only when its preset asks for `EnvelopeCurve::Exponential`.
+- **Drums under the NES profiles**: `INSTR_KICK` and `INSTR_SNARE` keep their authored noise period (60 and 15 samples), so the kick keeps its body and the snare its crack; `INSTR_HIHAT` takes NES period LUT index 0. `Legacy` plays all three at their authored period.
+- **An explicit `setHpfCutoffHz()` wins**: it suppresses the `Nes`/`Famicom` output chain *and* its level trim, putting the output back on the historical one-pole, level included.
+- `examples/apu_profiles` renders the same track under each profile — the shortest way to hear the difference before switching a game.
 
 ## Render Block, Latency and Underruns
 
@@ -479,7 +483,7 @@ Scene::update(dt):
 - **No FPU (ESP32-C3 RISC-V)**: Use Q15 fixed-point path — `EnvelopeState`, `LfoState`, `AudioChannel` have Q15/Q32 mirrors for all hot-path math. The integer/Q15 render path is ~4.4 dB louder than the float path — rebalance volumes when moving between FPU and no-FPU targets.
 - **IRAM_ATTR**: Mark `generateSamples()` and hot synthesis functions with `IRAM_ATTR` when using I2S DMA to avoid flash contention.
 - **Block size**: default 512 samples on FPU platforms, 1024 on no-FPU platforms (`platforms::config::HasFPU` selects the default). Hard ceiling `PR32_AUDIO_MAX_BLOCK_SAMPLES` = 1024; must be a positive multiple of 128. Smaller blocks lower latency but raise the wake-up rate.
-- **Sample rate**: 22 050 Hz is the only rate supported on every target. 32 000 Hz is available only where p99 stays under half the render block: on `esp32-c3-devkitm-1` the `Nes` and `Hybrid` profiles measure 50.1 % and 50.9 % of the block at eight voices, so 32 000 Hz is **unsupported for `Nes`/`Hybrid` on that board** (`Legacy` keeps it at 48.7 %). The APU has no per-target policy — the consumer enforces this envelope.
+- **Sample rate**: 22 050 Hz is the only rate supported on every target. 32 000 Hz is available only where p99 stays under half the render block: on `esp32-c3-devkitm-1` the `Nes` profile measures 50.1 % of the block at eight voices (`Legacy` keeps it at 48.7 %), so 32 000 Hz is **unsupported for `Nes` on that board**. `Famicom` does the same per-sample work as `Nes` and was not measured there, so assume it does not fit either. The APU has no per-target policy — the consumer enforces this envelope.
 - **Backend footprint**: `ESP32_I2S_AudioBackend` and `ESP32_DAC_AudioBackend` are ~2 KB each on `esp32dev` (1024-sample render buffer + counters). Give the backend file scope or heap, never a local inside a small-stack task.
 - **SPSC queue**: `AudioCommandQueue` capacity defaults to 64 entries (63 usable). `AUDIO_COMMAND_QUEUE_CAPACITY` accepts only 32–64 — the ceiling is a RAM budget, not throughput; values above 64 fail the `static_assert`.
 - **Sequencer note limit**: Default 32 notes/frame. Set via `setSequencerNoteLimit()` or `AUDIO_SEQUENCER_MAX_NOTES` to prevent audio starvation.
@@ -498,13 +502,13 @@ Scene::update(dt):
 9. **Breakpoint tables dangle like presets**: `dutySteps` and `pitchEnvelope` are pointer+count — the tables must be `static`/`constexpr`, with non-decreasing `timeSec`.
 10. **SFX voice stealing is subpool-local**: Effects can only steal slots 4–7 (looped voices are reclaimed first). If 4 non-looping SFX are active, a new effect steals one of them — melodic music voices are never interrupted.
 11. **Sequencer track slots are fixed**: Track N always plays on voice slot N (0–3). `STOP_CHANNEL` with `channelIndex` 0–3 kills a music track's voice.
-12. **The APU is an external dependency**: since engine 1.8.0 the synthesis core ships as `gperez88/PixelRoot32-APU@^2.0.0`. A game's `platformio.ini` must resolve that dependency (`lib_deps`) or every `audio/ApuCore.h` shim include fails to compile.
+12. **The APU is an external dependency**: since engine 1.8.0 the synthesis core ships as `gperez88/PixelRoot32-APU@^2.3.0` (the range the engine declares since 1.14.1). A game's `platformio.ini` must resolve that dependency (`lib_deps`) or every `audio/ApuCore.h` shim include fails to compile.
 13. **`preset` is field 7, NOT the last field**: it sits between `noisePeriod` (6) and `sweepEndHz` (8). A positional brace-init that trails `preset` at the end — `{type, frequency, duration, volume, duty, &INSTR_X}` — silently assigns the preset pointer to `noisePeriod`'s slot (or fails to compile), and omitting `noisePeriod` while positionally initializing `preset` shifts every field after it. Both produce **silently wrong audio, not a build error**. Past `duty`, prefer named assignment (`event.preset = &INSTR_PULSE_BASS;`). The correct positional form is `{type, frequency, duration, volume, duty, 0, &INSTR_PULSE_BASS}`.
 14. **Field order is `frequency, duration, volume`** — not `frequency, volume, duration`. Swapping 3 and 4 compiles cleanly (both `float`) and yields a note of the wrong length at the wrong loudness.
 15. **Commands land up to one block late**: the render block is the command granularity, so at the 1024-sample no-FPU default a `playEvent` can start up to ~46 ms after submission at 22 050 Hz. Do not assume sample-exact sync between game logic and audio.
 16. **`setSoundProfile()` is not game-thread safe**: it mutates state the renderer reads. From game code, submit `SET_SOUND_PROFILE`; call `setSoundProfile()` only on the audio thread.
-17. **A profile switch raises peaks**: `Nes`/`Hybrid` match loudness but not peak level — a mix tuned to clip-free peaks under `Legacy` may clip after switching.
-18. **`ApuCore::setHpfCutoffHz()` disables the profile output chain**: under `Nes`/`Hybrid`, an explicit call drops the NES filter chain and its level trim (historical one-pole, level included). Do not call it if you want the profile's output stage; like other direct setters it is not safe concurrently with rendering.
+17. **A profile switch raises peaks**: `Nes`/`Famicom` match loudness but not peak level (`Nes` ~37 %, `Famicom` ~20 % of full scale on the APU's canonical track vs 18 % for `Legacy`) — a mix tuned to clip-free peaks under `Legacy` may clip after switching.
+18. **`ApuCore::setHpfCutoffHz()` disables the profile output chain**: under `Nes`/`Famicom`, an explicit call drops the NES filter chain and its level trim (historical one-pole, level included). Do not call it if you want the profile's output stage; like other direct setters it is not safe concurrently with rendering.
 19. **Native teardown does not call `SDL_Quit()`** (since 1.14.0, issue #273): `SDL2_AudioBackend` acquires and releases only `SDL_INIT_AUDIO` (and skips closing the device if the audio subsystem is already gone); SDL's global state is reclaimed at process exit. Other SDL subsystems an app initialises (game controller, joystick) are not torn down by the engine. Under the documented declaration order (backend declared before `Engine`) the SDL audio callback can still run in the short window between `~Engine` and `~SDL2_AudioBackend` — see `docs/architecture/layer-drivers.md`.
 
 ## Common Patterns
@@ -557,5 +561,5 @@ engine.playEvent(fall);
 - **Testing:** If you modify audio components, YOU MUST read `pixelroot32-testing` and update/create the corresponding unit tests using Mocks.
 - **Block size:** NEVER set `AudioConfig::blockSize` to a value that is not a positive multiple of 128 or exceeds `PR32_AUDIO_MAX_BLOCK_SAMPLES` (1024). Leave the default unless you are deliberately trading latency for wake-ups.
 - **Sound profile:** Switch profiles from game code ONLY via `AudioCommandType::SET_SOUND_PROFILE`; NEVER call `ApuCore::setSoundProfile()` from the game thread. Leave `Legacy` as the default unless the user asks for a different character.
-- **Sample rate:** Use 22 050 Hz unless the target is known to support more; NEVER combine 32 000 Hz with `Nes`/`Hybrid` on ESP32-C3.
+- **Sample rate:** Use 22 050 Hz unless the target is known to support more; NEVER combine 32 000 Hz with `Nes`/`Famicom` on ESP32-C3.
 - **Native shutdown:** NEVER add `SDL_Quit()` calls to engine drivers or teardown code — each native driver owns only the SDL subsystem it initialised.
