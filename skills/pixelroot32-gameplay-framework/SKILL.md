@@ -8,7 +8,7 @@ metadata:
   subsystem: gameplay
   module: gameplay-framework
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
@@ -229,6 +229,7 @@ the keys it orders are computed per **`pixelroot32-projection`**.
 
 **Header** `include/gameplay/RoomGraph.h`, `include/gameplay/RoomLayout.h` ·
 **Namespace** `pixelroot32::gameplay` · **Feature gate** `PIXELROOT32_ENABLE_GAMEPLAY_ROOM`
+(plus `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` for the projected overload and `roomProjection`)
 
 ```cpp
 enum class RoomDir : uint8_t { Up = 0, Down = 1, Left = 2, Right = 3 };
@@ -259,12 +260,19 @@ template <uint16_t N> class RoomGraph : public RoomGraphBase {
     uint8_t     getConnections(uint16_t idx, int out[], uint8_t maxOut) const;
 };
 // RoomLayout.h
-inline constexpr uint16_t kNoRoomConnection  = 0xFFFF;  // :59 — the wall sentinel
+inline constexpr uint16_t kNoRoomConnection  = 0xFFFF;  // :71 — the wall sentinel
 inline constexpr uint16_t kGraphFull         = 0xFFFF;  // addRoom()'s "full" return
 inline constexpr int      kMaxRoomWorldCoord = 32767;
 struct RoomData { uint16_t originCol, originRow, cols, rows, connections[4]; };  // 16 B, TILES
 struct RoomLayer { const RoomData* rooms; uint16_t roomCount; uint8_t tileWidth, tileHeight; };
 template <uint16_t N> uint16_t buildRoomGraph(const RoomLayer& layer, RoomGraph<N>& graph);
+
+// ALSO with PIXELROOT32_ENABLE_TILEMAP_PROJECTION on (projected rooms):
+template <uint16_t N> uint16_t buildRoomGraph(const RoomLayer& layer, RoomGraph<N>& graph,
+                                              const math::ProjectionSpec& proj,
+                                              const graphics::ScreenBounds* perRoom = nullptr);
+constexpr math::ProjectionSpec roomProjection(const math::ProjectionSpec& proj,
+                                              const RoomData& room);
 
 // What the Tilemap Editor's room export emits, inside #if PIXELROOT32_ENABLE_GAMEPLAY_ROOM:
 static const pixelroot32::gameplay::RoomData ROOMSCREEN_MAIN_SCENE_ROOMS[] = {
@@ -278,8 +286,38 @@ static const pixelroot32::gameplay::RoomLayer ROOMSCREEN_MAIN_SCENE_ROOM_LAYER =
 
 `buildRoomGraph` validates the whole layer first (one out-of-range room rejects everything and
 returns `0`), **appends** rooms, and remaps layer-local connection indices into graph space.
-`Scene::onRoomEnter(int fromIdx, int toIdx)` (`include/core/Scene.h:157`) is the hook, also
+`Scene::onRoomEnter(int fromIdx, int toIdx)` (`include/core/Scene.h:182`) is the hook, also
 under `GAMEPLAY_ROOM` — but see Gotchas: it is not wired for you.
+
+**Projected rooms (isometric or any projected scene).** With
+`PIXELROOT32_ENABLE_TILEMAP_PROJECTION` also on, `buildRoomGraph` takes the scene's
+`math::ProjectionSpec` — and optionally one `graphics::ScreenBounds` per room — and builds each
+camera rect from the screen box of the room's cell diamonds instead of `cells * tile size`.
+`roomProjection(proj, room)` moves the projection's origin to the room's first cell, so a
+one-room map with local cells from `(0, 0)` draws where the room sits in the scene:
+
+```cpp
+rooms_ = gameplay::RoomGraph<kMaxRooms>{};
+if (gameplay::buildRoomGraph(ROOM_LAYER, rooms_, ISO_PROJECTION, art) > 0) {
+    setRoomGraph(&rooms_);
+    rooms_.enterRoom(0, &camera_);
+}
+
+const uint16_t r = rooms_.currentRoomIndex();
+renderer.drawTileMap(*ROOM_LAYERS[r], 0, 0, gfx::LayerType::Static,
+                     gameplay::roomProjection(ISO_PROJECTION, ROOMS[r]));
+```
+
+`RoomData`/`RoomLayer` do not change shape: rooms stay in scene cells and
+`tileWidth`/`tileHeight` are the cell **stride** (32x16 for 2:1), never the tile bitmap.
+Validation stays whole-layer and fail-closed, adding `math::projectionDet(proj) < 1` as one more
+reason to reject; the projected box is checked against `±kMaxRoomWorldCoord` in both signs,
+because an isometric basis puts rooms on the +Y side at negative screen X — `Room` and `Camera2D`
+store and clamp signed bounds, so that is normal, not an edge case. A game whose rooms are one
+screen each can skip the projection here and keep drawing through the scene's own
+`ISO_PROJECTION` with `enterRoom(r, nullptr)`. The rect geometry, the `perRoom` measurement and
+the camera/input consequences are owned by `pixelroot32-projection`; the room maps themselves
+come from `pixelroot32-tilemap-editor-export`.
 
 ## Feature Flags
 
@@ -297,7 +335,7 @@ Prefix every name below with `PIXELROOT32_ENABLE_`.
 | `..._GAMEPLAY_OBJECT_POOL` (`:122`) | `ObjectPool<T,N>` | `0` | `config::EnableGameplayObjectPool` |
 | `..._GAMEPLAY_GRID_SPACE` (`:126`) | `GridSpec` **and** `GridMotion` | `0` | `config::EnableGameplayGridSpace` |
 | `..._GAMEPLAY_ROOM` (`:130`) | `RoomGraph<N>`, `RoomLayout`, `Scene::onRoomEnter`/`setRoomGraph` | `0` | `config::EnableGameplayRoom` |
-| `PIXELROOT32_ENABLE_DIALOG` (`:156`) | `DialogTypes`, `DialogRunner`, `DialogBox` — owned by **`pixelroot32-dialog`** | `0` | `config::EnableDialog` |
+| `PIXELROOT32_ENABLE_DIALOG` (`:157`) | `DialogTypes`, `DialogRunner`, `DialogBox` - owned by **`pixelroot32-dialog`** | `0` | `config::EnableDialog` |
 | `..._PROJECTION` (`:142`) | `ProjectionSpec` + the `interpolatedWorld` overload | `0` | `config::EnableProjection` |
 
 Two **require `PIXELROOT32_ENABLE_PHYSICS=1`** and fail the build with an `#error` in
@@ -336,6 +374,10 @@ snapCameraToRoom(startRoom);                       // enterRoom only CLAMPS boun
 15x15-tile rooms in a `RoomGraph<4>` built from a Tilemap-Editor-exported layer, camera snapped
 with `camera.setPosition(math::Vector2(room.cameraMinX, room.cameraMinY))`.
 
+An isometric scene uses the same wiring with the projection: `buildRoomGraph(layer, graph,
+ISO_PROJECTION, perRoom)` and one `drawTileMap` per room through `roomProjection` — reference
+`graphics/iso_dungeon` and `graphics/iso_tilemap_export` (in PixelRoot32-Demo-Projects).
+
 **Pooled projectiles — `games/midway_clone`** (in PixelRoot32-Demo-Projects) (`OBJECT_POOL=1`): four `Scene`-member pools
 (`ObjectPool<Bullet,8>`, `ObjectPool<Bullet,12>`, `ObjectPool<Enemy,10>`,
 `ObjectPool<Explosion,6>`), all `reset()` from the scene's `init()` *after* `Scene::init()` ran.
@@ -371,7 +413,7 @@ value) — call it once per frame and cache. `worldToCellX/Y` cost exactly one `
 ## Gotchas
 
 - **`Scene::onRoomEnter` is not wired for you.** `setRoomGraph()` only stores the pointer
-  (`Scene.h:180`); nothing in `Scene.cpp` touches `onEnter`. Call
+  (`Scene.h:205`); nothing in `Scene.cpp` touches `onEnter`. Call
   `graph.setOnEnter(&MyScene::trampoline, this)` with a static trampoline forwarding to the
   virtual, or `onRoomEnter()` stays permanently silent.
 - **`enterRoom()` does not move the camera** — it only sets `setBounds`/`setVerticalBounds` and
@@ -406,7 +448,15 @@ value) — call it once per frame and cache. `worldToCellX/Y` cost exactly one `
   `0xFFFF` before the first `enterRoom()`**, and the first `onRoomEnter` reports
   `fromIdx == 0xFFFF`.
 - **`buildRoomGraph` appends.** Re-running `init()` on a scene swap without
-  `graph = RoomGraph<N>{};` silently adds nothing and returns `0`.
+  `graph = RoomGraph<N>{};` silently adds nothing and returns `0`. In the projected overload
+  `perRoom` stays indexed by **layer position**, not graph index — the overload recovers the
+  entry from its address. An array ordered by graph index misaligns every rect after an append.
+- **A projected room rect is the room's screen extent, not a camera-position range.** Do not feed
+  it to `Camera2D` as scroll bounds; a scrolling projected scene converts its own map extents with
+  `graphics::cameraRangeFor`. A negative rect is normal under an isometric basis.
+- **Without `perRoom` a projected rect ignores overhang** — it covers the cells' diamonds only.
+  A room whose walls rise above their cells needs each rect widened with
+  `expandProjectedMapBounds` over that room's map, or the camera clamps inside the art.
 - **Game event codes start at `GameplayEventType::UserBase` (64)** — below that is reserved.
 
 ## Common Patterns
@@ -466,7 +516,11 @@ if (!bus.publish(hit)) { /* dropped; getDroppedCount() was bumped */ }
 - **Keep flag pairings honest.** `INTERACTION_TRIGGERS` and `SPATIAL_QUERY` require
   `PIXELROOT32_ENABLE_PHYSICS=1`. The `ProjectionSpec` overload of `interpolatedWorld` requires
   `GAMEPLAY_GRID_SPACE` **and** `PROJECTION`. `InteractionTracker::setEventBus()` requires
-  `GAMEPLAY_EVENTS`.
+  `GAMEPLAY_EVENTS`. The projected `buildRoomGraph` overload and `roomProjection` require
+  `GAMEPLAY_ROOM` **and** `TILEMAP_PROJECTION`.
+- **Build the room graph once, in `init()`**, and check `buildRoomGraph`'s return: `0` means the
+  whole layer was rejected and `enterRoom()` is then a silent no-op. A projected scene passes the
+  projection (and `perRoom` when art overhangs) and draws each room through `roomProjection`.
 - **C++17, `-fno-exceptions`, no RTTI.** PascalCase types, camelCase methods.
 - **Cross-reference, do not duplicate**: `pixelroot32-projection` (isometric/oblique,
   `ProjectionSpec`, `compareByDepthKey`), `pixelroot32-physics` (`CollisionSystem`,

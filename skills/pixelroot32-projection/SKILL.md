@@ -1,6 +1,6 @@
 ---
 name: pixelroot32-projection
-description: Isometric, oblique and mirrored layouts through one integer 2x2 basis (ProjectionSpec), plus projected tilemap drawing, depth sorting and projected camera bounds. Use when a PixelRoot32 game is isometric or non-axis-aligned, or when screen position stops equaling world position.
+description: Isometric, oblique and mirrored layouts through one integer 2x2 basis (ProjectionSpec), plus projected tilemap drawing, projected room rects, depth sorting and projected camera bounds. Use when a PixelRoot32 game is isometric or non-axis-aligned, or when screen position stops equaling world position.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
@@ -9,7 +9,7 @@ metadata:
   module: projection
   feature_gate: PIXELROOT32_ENABLE_PROJECTION
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
@@ -29,7 +29,7 @@ Everything is opt-in; a `constexpr` spec costs zero SRAM.
 
 **Header**: `include/math/Projection.h`
 **Namespace**: `pixelroot32::math`
-**Feature gate**: `PIXELROOT32_ENABLE_PROJECTION` (default `0`, wraps the whole file; config mirror `pixelroot32::platforms::config::EnableProjection`, `EngineConfig.h:628`)
+**Feature gate**: `PIXELROOT32_ENABLE_PROJECTION` (default `0`, wraps the whole file; config mirror `pixelroot32::platforms::config::EnableProjection`, `EngineConfig.h:712-717`)
 
 ```cpp
 struct ProjectionSpec {
@@ -98,7 +98,7 @@ namespace detail { using pixelroot32::math::detail::projectionFloorDiv; }
 
 **Header**: `include/gameplay/DepthCompare.h`, `include/core/Entity.h`, `include/core/Scene.h`
 **Namespace**: `pixelroot32::gameplay`, `pixelroot32::core`
-**Feature gate**: `PIXELROOT32_ENABLE_DEPTH_SORT` for `depthKey` and `compareByDepthKey` (config mirror `config::EnableDepthSort`, `EngineConfig.h:568`); `compareByBottomY` is **unguarded**.
+**Feature gate**: `PIXELROOT32_ENABLE_DEPTH_SORT` for `depthKey` and `compareByDepthKey` (config mirror `config::EnableDepthSort`, `EngineConfig.h:652-657`); `compareByBottomY` is **unguarded**.
 
 ```cpp
 int16_t depthKey = 0;                                             // Entity.h:107, inside the guard
@@ -121,9 +121,9 @@ Render layer stays the primary sort key — the comparator only breaks ties **wi
 
 ## Projected Tilemaps
 
-**Header**: `include/graphics/Renderer.h` (guard opens at `:1263`)
+**Header**: `include/graphics/Renderer.h` (guard opens at `:1265`)
 **Namespace**: `pixelroot32::graphics`
-**Feature gate**: `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` (default `0`) — **requires** `PIXELROOT32_ENABLE_PROJECTION=1`; violating that is a hard `#error` at `PlatformDefaults.h:178-179`. There is **no** `config::EnableTilemapProjection`; this flag is preprocessor-only.
+**Feature gate**: `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` (default `0`) — **requires** `PIXELROOT32_ENABLE_PROJECTION=1`; violating that is a hard `#error` at `PlatformDefaults.h:200-201`. There is **no** `config::EnableTilemapProjection`; this flag is preprocessor-only.
 
 ```cpp
 void drawTileMap(const TileMap4bpp& map, int originX, int originY,
@@ -133,8 +133,8 @@ void drawTileMap(const TileMap2bpp& map, int originX, int originY,
 void drawTileMap(const TileMap& map, int originX, int originY, Color color,
                  LayerType layerType, const pixelroot32::math::ProjectionSpec& projection);
 
-const uint8_t* tileFootY = nullptr;             // TileMapGeneric<T>, Renderer.h:158
-inline uint8_t footYFor(uint16_t index) const;  // :176 — tileFootY[index], else 0
+const uint8_t* tileFootY = nullptr;             // TileMapGeneric<T>, Renderer.h:160
+inline uint8_t footYFor(uint16_t index) const;  // :178 — tileFootY[index], else 0
 ```
 
 All three take a **reference** (no null-map form) and give `layerType` **no default**, unlike the orthogonal 4bpp overload. Per-cell anchor used by the implementation:
@@ -147,6 +147,52 @@ drawY = cellToScreenY(tx, ty, drawSpec) - map.footYFor(index)
 The path iterates row-major and **never sorts**. Row-major is a valid back-to-front order only when `rowMajorIsPainterOrder(projection)` holds — a predicate that is *sufficient, not necessary*: it is `false` for the Orthogonal and Oblique rows above (`axisXy == 0`) and both still paint correctly because their art fills its cell. `false` means "unproven", not "invalid".
 
 1bpp limits: `Sprite::width` caps at 16 px so a 2:1 diamond caps at 16x8, and `color` is one value for the whole map — shaded 1bpp diamonds cannot exist.
+
+## Rooms Under a Projection
+
+**Header**: `include/gameplay/RoomLayout.h` (`roomProjection` at `:279`, the overload's docs at `:361-435`, definition at `:439`)
+**Namespace**: `pixelroot32::gameplay`
+**Feature gate**: `PIXELROOT32_ENABLE_GAMEPLAY_ROOM` **and** `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` — the projected overload and `roomProjection` sit inside a nested `#if`, so the room flag alone compiles only the orthogonal API
+
+```cpp
+constexpr math::ProjectionSpec roomProjection(const math::ProjectionSpec& proj,
+                                              const RoomData& room);
+
+template <uint16_t N>
+uint16_t buildRoomGraph(const RoomLayer& layer, RoomGraph<N>& graph,
+                        const math::ProjectionSpec& proj,
+                        const graphics::ScreenBounds* perRoom = nullptr);
+```
+
+A projected scene builds its room graph from the same exported `RoomLayer` an orthogonal one uses; only the camera rect differs. `RoomData`/`RoomLayer` keep their shape: rooms stay in **scene cells** and `tileWidth`/`tileHeight` are the cell **stride** (32x16 for 2:1), never the art extent.
+
+**The rect is the screen box of the room's cell footprints.** `cellToScreenX/Y` returns a cell's *centre* — where the projected renderer anchors its tile (`centre - width / 2`, `centre - footY`). The footprint is `centre + s * axisX + t * axisY` for `s, t` in `[-1/2, 1/2]`, so the union over `[originCol, originCol + cols] × [originRow, originRow + rows]` is that corner-anchor box moved half a cell by `-(axisX + axisY) / 2` (for `{.., 16, 8, -16, 8}`: `(0, -8)`), rounded outward when the sum is odd. All four corners go through `cellToScreenX/Y` first: under a basis with `axisYx < 0` the extremes sit at different corners. A floor-only room whose tiles exactly fill their diamonds draws exactly this box. It is the room's *extent*, not a camera-position range — `graphics::cameraRangeFor` is the latter.
+
+**`perRoom` widens it for overhang.** The diamond box cannot know how far art rises above its cell (a 40 px wall on a 16 px cell). Pass one `graphics::ScreenBounds` per room, indexed like `layer.rooms` — typically `expandProjectedMapBounds` over that room's own map drawn through `roomProjection`. An entry with `valid == false` leaves its room's box unchanged.
+
+```cpp
+graphics::ScreenBounds art[2];
+for (int i = 0; i < 2; ++i) {
+    graphics::expandProjectedMapBounds(art[i], *ROOM_LAYERS[i],
+                                       gameplay::roomProjection(ISO, ROOMS[i]));
+}
+if (gameplay::buildRoomGraph(ROOM_LAYER, rooms_, ISO, art) > 0) {
+    setRoomGraph(&rooms_);
+    rooms_.enterRoom(0, &camera);   // clamps bounds; it still does not move the camera
+}
+```
+
+**`roomProjection` places a one-room map.** It returns `proj` with only `originX`/`originY` moved to the screen position of cell `(originCol, originRow)`; the basis is untouched. A map holding one room with local cells from `(0, 0)`, drawn through it, lands where those cells sit in the scene:
+
+```cpp
+const uint16_t r = rooms_.currentRoomIndex();
+renderer.drawTileMap(*ROOM_LAYERS[r], 0, 0, LayerType::Static,
+                     gameplay::roomProjection(ISO, ROOMS[r]));
+```
+
+**Validation is fail-closed and adds one reason.** Pass 1 rejects the whole layer — building nothing — on a null pointer, an empty layer, a zero tile size, `math::projectionDet(proj) < 1`, or any room whose **widened** box leaves `[-kMaxRoomWorldCoord, kMaxRoomWorldCoord]` on either axis. That bound applies to the projected box in both signs: an isometric basis puts rooms on the +Y side at negative screen X. `kMaxRoomWorldCoord` is 32767 because `Room` and `Camera2D` store signed `Scalar` and clamp to them as-is.
+
+Heap-free and init-time: four cell projections plus floor divisions per room per pass. `pixelroot32-gameplay-framework` owns `RoomGraph`, the orthogonal overload, and the append semantics both overloads share.
 
 ## Producer Obligations
 
@@ -206,6 +252,7 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 
 - **Declare the spec once, beside the map, with its invariants**, and emit it *outside* any sprite-format guard so a 4bpp-off build still has geometry (`graphics/iso_dungeon/src/assets/IsoDungeonRoomTileMap.h` in PixelRoot32-Demo-Projects).
 - **Projection + depth sort**: tiles paint row-major unsorted; movers and reachable props are entities on one shared `renderLayer`, each writing `depthKey`, with `depthComparator` and `depthSortEnabled` set in the scene's `init()`. See `pixelroot32-scene-manager`.
+- **Projection + rooms**: build the graph with `buildRoomGraph(layer, graph, proj, perRoom)` and draw the current room through `roomProjection(proj, room)`; widen each rect with `expandProjectedMapBounds` over that room's map when art overhangs. See `pixelroot32-gameplay-framework`.
 - **Projection + camera**: `expandProjectedMapBounds` -> `cameraRangeFor` -> `Camera2D::setBounds`/`setVerticalBounds`, then draw at origin `(0,0)`. See `pixelroot32-camera2d`.
 - **Projection + input**: `screenToCellX/Y` turns a touch into a cell. See `pixelroot32-touch-input`.
 - **Projection + orthogonal rendering**: span tables, dirty regions and static snapshots apply unchanged. See `pixelroot32-sprite-renderer`.
@@ -218,11 +265,12 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 - `depthKey` costs +4 bytes per `Entity` on 32-bit, 256 B at 64 entities.
 - `cellRangeForScreenRect` over-approximates under a non-orthogonal basis (~2.25x for 2:1 iso on 240x240). Each rejected cell is one bounds compare — far cheaper than a sprite decode. Intended overdraw.
 - `expandProjectedMapBounds` is `O(tileCount + 4)` and heap-free — scene init only, never per frame.
+- A projected room rect costs four cell projections and two floor divisions per room, once at `buildRoomGraph` time; the graph itself is the same `RoomGraph<N>` the orthogonal path builds.
 - Flash-resident `Sprite4bpp` descriptors are read-only on ESP32: `iso_dungeon` gates its `computeSpanTable` + `const_cast` span wiring behind `#if !defined(ESP32)` (`IsoDungeonScene.cpp`, in Demo-Projects `graphics/iso_dungeon`), because writing `rowMinX`/`rowMaxX` into flash panics with `LoadStoreError` on first draw.
 
 ## Gotchas
 
-- `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is a hard `#error` (`PlatformDefaults.h:137-139`).
+- `PIXELROOT32_ENABLE_GAMEPLAY_PROJECTION` was **renamed** to `PIXELROOT32_ENABLE_PROJECTION`; the old spelling is a hard `#error` (`PlatformDefaults.h:137-138`).
 - `TILEMAP_PROJECTION=1` without `PROJECTION=1` is a hard `#error` (`PlatformDefaults.h:200-201`).
 - `CellRange`/`cellRangeForScreenRect` live **only** in `math::`; `gameplay::` does not forward them.
 - There is no `config::EnableTilemapProjection`. `config::EnableProjection` (`EngineConfig.h:628`) and `config::EnableDepthSort` (`EngineConfig.h:568`) do exist.
@@ -236,7 +284,7 @@ Projects both endpoints and lerps. `GridMotion` state (`placeAt`, `beginStep`, `
 - `depthComparator` and `depthSortEnabled` are `protected` `Scene` members — set them inside a `Scene`-derived `init()`.
 - `graphics/iso_dungeon` (in Demo-Projects) declares **no `GridSpec`** at all. It still needs `PIXELROOT32_ENABLE_GAMEPLAY_GRID_SPACE=1` because `GridMotion` shares that flag. Do not invent a `GridSpec` for an isometric game.
 - The `iso_dungeon` README says `gameplay::ProjectionSpec` in prose while the asset header uses `pixelroot32::math::ProjectionSpec`. Same type (a `using` alias); prefer the `math::` spelling in new code.
-- **The Tilemap Editor exports isometric scenes — except the foot table.** Per `docs/tools/tilemap-editor/isometric-guide.md`, the C++ export emits `ISO_PROJECTION`, a rectangular `TILE_WIDTH`/`TILE_HEIGHT` cell stride and `inline constexpr` dimensions, with `static_assert`s that fire at the consuming project's compile. `TILESET_FOOT_Y` is still hand-added per the export contract (`cpp_code_generator.cpp` cannot emit it yet, and `Renderer.h` notes the editor exports no foot-anchor table today). An isometric scene round-trips — do not hand-write the rest of the export. `docs/architecture/projected-tilemap-producer-obligations.md` still calls this an unbuilt "phase-2" generator delta; **that passage is stale**. The obligations themselves remain binding: any `TileMapGeneric` built by hand or by another tool must still satisfy all seven.
+- **The Tilemap Editor emits the whole isometric contract.** For an isometric scene the C++ export emits `ISO_PROJECTION` with its `static_assert`s (outside the sprite-format guard), a rectangular `TILE_WIDTH`/`TILE_HEIGHT` cell stride, a `TILESET_FOOT_Y` table wired into `tileFootY` by `init()`, a zero-extent slot 0, precomputed span tables, `inline constexpr` dimensions and one map per room (`ROOM_LAYERS[]`, `NUM_ROOM_LAYERS`). An isometric scene round-trips — do not hand-write or hand-patch any of it; see `pixelroot32-tilemap-editor-export`. The obligations remain binding for a `TileMapGeneric` built by hand or by another tool.
 
 ## Common Patterns
 
@@ -308,6 +356,7 @@ if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return;  // floors,
 - Pass the projection as a draw argument, and pass origin `(0,0)` when a camera is applied.
 - Provide a zero-extent, readable slot 0 and keep tile ids 1-based.
 - Set `tileWidth`/`tileHeight` to the cell stride.
+- For a room placed in a scrolling projected scene, pass the projection to `buildRoomGraph` and draw the room through `roomProjection`; measure `perRoom` with `expandProjectedMapBounds` whenever art overhangs its cell.
 - Add `PIXELROOT32_ENABLE_PROJECTION=1` (plus `..._TILEMAP_PROJECTION=1`, `..._DEPTH_SORT=1`, `..._GAMEPLAY_GRID_SPACE=1` as needed) to `platformio.ini` build flags.
 
 **DON'T**
@@ -323,3 +372,5 @@ if (cx < 0 || cy < 0 || cx >= MAP_WIDTH || cy >= MAP_HEIGHT) return;  // floors,
 - Do not convert a sprite-per-cell layer to `drawTileMap` without checking that the sprite and background palette banks agree.
 - Do not swap `ScreenBounds` and `CameraBounds`, and do not change `cameraRangeFor`'s truncation to floor division.
 - Do not write to flash-resident sprite descriptors on ESP32.
+- Do not derive a projected room rect by hand (`cells * tile size`), assume a room rect is non-negative, or treat it as a camera-position range.
+- Do not call `buildRoomGraph` with a projection and then draw the room through the scene projection; the room map's local cells need `roomProjection`.
