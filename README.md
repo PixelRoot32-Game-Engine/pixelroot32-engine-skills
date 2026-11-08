@@ -40,15 +40,16 @@ The suite is divided into specific engine subsystems. Your AI will dynamically l
 | `pixelroot32-particles` | How to spawn explosion or dust effects respecting the hard limit of 50 particles per emitter. |
 | `pixelroot32-touch-input` | How to map raw touch events to gestures and prevent UI events from bleeding into the game logic. |
 | `pixelroot32-camera2d` | How to manipulate the viewport, apply screen shake, and bounds clamping. |
-| `pixelroot32-projection` | How to lay a cell grid on screen with one integer `ProjectionSpec` (orthogonal, isometric 2:1 or 1:1, oblique), sort sprites by per-cell depth, and clamp the camera to projected bounds. |
+| `pixelroot32-projection` | How to lay a cell grid on screen with one integer `ProjectionSpec` (orthogonal, isometric 2:1 or 1:1, oblique), sort sprites by per-cell depth, place projected room rects, and clamp the camera to projected bounds. |
 | `pixelroot32-entity-actor` | How to structure the game objects using the Godot-inspired node hierarchy. |
-| `pixelroot32-gameplay-framework` | How to assemble grid-locked movement, screen-by-screen rooms, state machines, and object pools from the `pixelroot32::gameplay` primitives. |
+| `pixelroot32-gameplay-framework` | How to assemble grid-locked movement, screen-by-screen rooms (orthogonal or projected), state machines, and object pools from the `pixelroot32::gameplay` primitives. |
 | `pixelroot32-dialog` | How to write branching dialogue, choice menus, paged text boxes and speaker portraits with the headless `DialogRunner` and the `DialogBox` panel. |
 | `pixelroot32-networking` | How to add router-free ESP-NOW multiplayer with `NetSession` peer discovery and reliable delivery, `NetCounter` shared state, and the `LoopbackTransport` for deterministic native tests (opt-in `PIXELROOT32_ENABLE_NETWORKING`). |
 | `pixelroot32-persistence` | How to store settings and save slots through `PersistenceService` with typed `StoreResult` errors, the `RecordCodec` schema/CRC envelope, and NVS, host-file or in-memory stores (opt-in `PIXELROOT32_ENABLE_PERSISTENCE`). |
 | `pixelroot32-testing` | How to generate Unity framework unit tests using Mocks for isolated validation. |
 | `pixelroot32-cpp-code-generation`| General C++17 formatting, naming conventions, `-fno-exceptions` enforcement, and Doxygen documentation standards. |
 | `pixelroot32-game-scaffold` | How to scaffold a new PlatformIO project: `platformio.ini`, base build flags, native/ESP32 platform entry points, and a minimal `Scene`. |
+| `pixelroot32-tilemap-editor-export` | How to consume the Tilemap Editor's C++ export: generated files and `init()`, export options, the isometric contract (cell stride, foot table, span tables, room maps), and the re-export cycle. |
 
 ## 🛡️ Engine Constraints Enforced by these Skills
 

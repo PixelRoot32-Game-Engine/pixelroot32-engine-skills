@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
@@ -164,24 +164,24 @@ For subsystem-specific code generation, use the specialized skills:
 | Input | `pixelroot32-touch-input` | Touch events, state machine |
 | Particles | `pixelroot32-particles` | Emitters, presets |
 | Entities | `pixelroot32-entity-actor` | Actor types, lifecycle |
-| Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected camera bounds |
-| Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
+| Projection | `pixelroot32-projection` | Isometric, oblique or any non-axis-aligned view: `ProjectionSpec`, cell↔screen math, depth sorting, projected `drawTileMap`, projected room rects (`buildRoomGraph` with a projection, `roomProjection`), projected camera bounds |
+| Gameplay framework | `pixelroot32-gameplay-framework` | `pixelroot32::gameplay` building blocks: `GridSpec`/`GridMotion` grid-locked movement, `RoomGraph`/`RoomData`/`RoomLayer`/`buildRoomGraph` (orthogonal and projected) screen-by-screen rooms, `StateMachine`, `ObjectPool<T,N>`, `GameplayEventBus`, `InteractionComponent`/`InteractionTracker` |
 | Networking | `pixelroot32-networking` | ESP-NOW peer-to-peer multiplayer (`PIXELROOT32_ENABLE_NETWORKING`): `NetSession` discovery and reliable delivery, `NetTransport` backends (`ESP32EspNowTransport`, `LoopbackTransport`), `NetCounter` shared state |
 | Persistence | `pixelroot32-persistence` | Settings and save slots (`PIXELROOT32_ENABLE_PERSISTENCE`): `IKeyValueStore`/`ISlotStore`, `StoreResult`, `RecordCodec` envelope, `PersistenceService`, NVS / host-file / memory adapters |
 | Dialog | `pixelroot32-dialog` | Branching dialogue and choice menus: `DialogRunner` headless state machine, `DialogLine`/`DialogChoice` flash scripts, `DialogBox` panel, speaker portraits, selection caret |
+| Tilemap Editor export | `pixelroot32-tilemap-editor-export` | Consuming a generated scene/tileset: file shape and namespace, export options, depth-guard split, `TILESET_FOOT_Y`, precomputed span tables, zero-extent slot 0, isometric room maps, re-export cycle |
 
 For memory patterns and ESP32 constraints, see `pixelroot32-memory-optimization`. For creating a new game project from scratch (PlatformIO scaffold, platform entry points, minimal scene), see `pixelroot32-game-scaffold`.
 
 ## Tilemap Editor export contract
 
-Isometric exports must satisfy `docs/architecture/projected-tilemap-producer-obligations.md` (reference: `graphics/iso_dungeon` in PixelRoot32-Demo-Projects). Six rules the current generator cannot all emit — hand-check them:
+Exported scene headers, tilesets and palettes are **generated data, not code you maintain**: a re-export overwrites them. The full contract — generated file shape, export options, the isometric depth-guard split, cell stride, `TILESET_FOOT_Y`, precomputed span tables, zero-extent slot 0, the three `static_assert`s, room maps and the re-export cycle — lives in **`pixelroot32-tilemap-editor-export`**. Read it before wiring or "fixing" an export.
 
-- Rectangular cell stride: one `TILE_WIDTH`/`TILE_HEIGHT` pair expressing the cell (a 32×16 cell with 40 px art needs stride ≠ bitmap size).
-- `TILESET_FOOT_Y` table (hand-added; the editor exports no foot-anchor table yet).
-- `ISO_PROJECTION` emitted OUTSIDE any sprite-format guard (gameplay places actors where no tile draws; gating geometry on 4bpp breaks 4bpp-off builds).
-- `inline constexpr` dimensions, not `static const` (they cross translation units).
-- `uint8_t` tileset pool (never `uint16_t` art through `reinterpret_cast<const uint8_t*>` — endianness trap).
-- Props (altar, pillar) as depth-sorted sprites in their own header — never tile-layer entries.
+Three rules that still belong to this skill, because they are about code you write around the export:
+
+- **Never edit the generated files.** Game code, layout rules and gameplay data live in your own files; the editor owns `<namespace>_<scene>.{h,cpp}` and the palette header.
+- **Geometry outside the sprite-format guard, and `inline constexpr` for constants that cross translation units.** Gameplay places actors on cells where no tile draws, so gating the projection on `PIXELROOT32_ENABLE_4BPP_SPRITES` breaks a 4bpp-off build; an internal-linkage constant cannot initialise a consumer's own `constexpr`.
+- **A `uint8_t` tileset pool, never `uint16_t` art through `reinterpret_cast<const uint8_t*>`.** The wider pool silently assumes a little-endian target.
 
 ## Logging Integration
 
