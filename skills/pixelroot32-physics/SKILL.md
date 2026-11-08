@@ -8,7 +8,7 @@ metadata:
   subsystem: physics
   module: collision
   feature_gate: PIXELROOT32_ENABLE_PHYSICS
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
   platform: cross-platform
 ---
 

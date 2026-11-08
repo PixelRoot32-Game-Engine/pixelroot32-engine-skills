@@ -9,7 +9,7 @@ metadata:
   module: ui
   feature_gate: PIXELROOT32_ENABLE_UI_SYSTEM
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
