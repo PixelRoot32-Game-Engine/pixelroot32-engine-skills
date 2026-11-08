@@ -126,7 +126,7 @@ extra_configs = lib/platformio.ini
 [env:native]
 extends = base_native
 lib_deps =
-    gperez88/PixelRoot32-Game-Engine@^1.14.0
+    gperez88/PixelRoot32-Game-Engine@^1.15.0
 build_flags =
     ${base_native.build_flags}
     -D PHYSICAL_DISPLAY_WIDTH=240
@@ -283,7 +283,7 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 
 | Fork | Options | Rule |
 |------|---------|------|
-| Engine dependency | inside engine repo vs standalone | Inside engine repo → `lib_deps = symlink://<relative path to engine root>`. Standalone (Demo-Projects) → registry `lib_deps = gperez88/PixelRoot32-Game-Engine@^1.14.0`, or git `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>`. |
+| Engine dependency | inside engine repo vs standalone | Inside engine repo → `lib_deps = symlink://<relative path to engine root>`. Standalone (Demo-Projects) → registry `lib_deps = gperez88/PixelRoot32-Game-Engine@^1.15.0`, or git `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>`. |
 | Platforms | native only / +esp32dev / +esp32s3 | Always include `native`; add ESP32 envs + matching `platforms/*.h` as needed. |
 | Audio | with / without | With audio, add `SDL2_AudioBackend` + `Engine(config, inputConfig, audioConfig)` (see `games/snake/src/platforms/native.h` in Demo-Projects). Without, `Engine(config, inputConfig)`. |
 | Display | ST7735 (128×128) / ST7789 (240×240) / OLED | Pick `DisplayType` + TFT flags + `PHYSICAL_DISPLAY_WIDTH/HEIGHT`. `OLED_SSD1306`/`OLED_SH1106` use U8g2 (`-D PIXELROOT32_USE_U8G2_DRIVER`, I2C pin ctor — see `games/flappy_bird/src/platforms/esp32_c3.h` in Demo-Projects). |
