@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: camera2d
   platform: cross-platform
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
   # No single feature_gate: the subsystem is only partially gated. Camera2D is
   # always compiled; CameraEffectsSystem is behind PIXELROOT32_ENABLE_CAMERA_EFFECTS
   # and CameraTween behind PIXELROOT32_ENABLE_CAMERA_TWEEN. Each Key API entry
