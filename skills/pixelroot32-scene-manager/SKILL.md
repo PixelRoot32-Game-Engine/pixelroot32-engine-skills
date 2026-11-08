@@ -1,13 +1,13 @@
 ---
 name: pixelroot32-scene-manager
-description: Scene lifecycle management with stack-based scene navigation, Fade/Iris transitions, entity management with arena allocation, and CameraEffects integration. Use when structuring game screens, managing scene transitions, or organizing entity lifecycles.
+description: Scene lifecycle management with stack-based scene navigation, Fade/Iris transitions, entity management with arena allocation, CameraEffects integration, and the networking event hook. Use when structuring game screens, managing scene transitions, or organizing entity lifecycles.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
   domain: engine
   subsystem: core
   module: scene-manager
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
   platform: cross-platform
 ---
 
@@ -57,6 +57,12 @@ class GameScene : public Scene {
     void initUI() override { /* Add UI elements */ }
     void updateUI(unsigned long dt) override { /* Update UI */ }
     bool shouldRedrawFramebuffer() const override { return true; }
+#if PIXELROOT32_ENABLE_NETWORKING
+    // The hook itself only exists with the flag on; see the pipeline below
+    void onNetworkEvent(const pixelroot32::networking::NetEvent& event) override {
+        // event.type / event.payload — see pixelroot32-networking
+    }
+#endif
 
 private:
     std::unique_ptr<Player> player;
@@ -269,6 +275,17 @@ void onUnconsumedTouchEvent(const TouchEvent& event) override {
 }
 ```
 
+### Network Event Pipeline
+
+`PIXELROOT32_ENABLE_NETWORKING` adds one `Scene` virtual, `onNetworkEvent(const networking::NetEvent&)` (`Scene.h:166`), plus `Engine::setNetworkSession()` / `getNetworkSession()`. The application owns the transport and the session; `Engine` only borrows the pointer and never initialises or shuts it down.
+
+`Engine::update()` order (`src/core/Engine.cpp:380-393`): input → `session->update()` and one dispatch per queued event → `Scene::update()` → touch dispatch. Two consequences:
+
+- **Dispatch happens before `Scene::update()`**, so the scene can react to a message in the same frame it arrived.
+- **Events go to the scene current at drain time**, not the scene that was current when they were queued — a scene swap therefore routes already-queued (possibly already-acknowledged) messages to the new scene instead of dropping them.
+
+The base hook is a no-op, so a scene that ignores networking only pays for the virtual slot. Unlike `onRoomEnter`, **no trampoline is required**: `Engine` calls the current scene's hook directly, because it holds the scene manager. Session API, event payloads and reliability semantics live in `pixelroot32-networking`.
+
 ### Camera Effects Integration
 
 ```cpp
@@ -417,3 +434,4 @@ void MyScene::resetState() noexcept {
 
 ## Agent Constraints
 - **CRITICAL OWNERSHIP WARNING:** `SceneManager` does NOT own scene pointers. ALWAYS clean up the `SceneArena` and local objects when doing `popScene()` or destroying a scene to prevent memory leaks and dangling pointers.
+- **`onNetworkEvent` is the one hook `Engine` calls for you** (because it holds the scene manager); `onRoomEnter` needs a graph trampoline. Do not invent a networking trampoline, and do not override `onNetworkEvent` with the flag off — the virtual does not exist then.

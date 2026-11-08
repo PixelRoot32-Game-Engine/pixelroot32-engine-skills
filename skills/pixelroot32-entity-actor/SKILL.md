@@ -7,7 +7,7 @@ metadata:
   domain: engine
   subsystem: core
   module: entity-actor
-  engine_version: "1.12.0"
+  engine_version: "1.15.0"
   platform: cross-platform
 ---
 
