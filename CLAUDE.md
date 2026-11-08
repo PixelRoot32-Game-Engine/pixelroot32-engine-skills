@@ -49,6 +49,8 @@ Engine-subsystem skills (audio, physics, particles, camera2d, sprite-renderer, s
 
 Cross-cutting skills (`cpp-code-generation`, `memory-optimization`, `testing`) do not follow that order. All three open with `## Overview` and then `## Source of Truth` — naming the engine docs they are derived from — before their own topic sections, and all three still end with `## Agent Constraints`. Keep the `## Source of Truth` section: it is what makes a cross-cutting skill auditable.
 
+The **tooling** skill (`tilemap-editor-export`) follows the cross-cutting shape — `## Overview`, `## Source of Truth`, topic sections, `## Agent Constraints` — and sets `subsystem: tooling`, `engine_version` for the engine release whose export format it documents. It owns the export contract; every other skill points at it instead of restating the generated file shape.
+
 ## Engine Rules the Skills Must Encode
 
 All skill content documents (and must stay consistent with) the engine's core pillars — contradicting these across skills is the main failure mode to avoid:
@@ -59,6 +61,7 @@ All skill content documents (and must stay consistent with) the engine's core pi
 - **Feature gates**: subsystems are wrapped in `#if PIXELROOT32_ENABLE_*` macros; skills state the gate for each API they document.
 - **No exceptions/RTTI** (`-fno-exceptions`); C++17; PascalCase types, camelCase methods/members, no `m_` prefixes; public namespaces are `pixelroot32::{core,graphics,graphics::ui,input,physics,math,audio,gameplay,networking,persistence}`.
 - **Event consumption**: touch/UI events must call `event.consume()` to prevent input bleeding into game logic.
+- **Bit order**: 1bpp sprites, fonts and 1bpp tilemaps put the leftmost pixel at bit `width - 1` (bit 0 is the rightmost); 2bpp packs 4 pixels per byte with pixel 0 in the low bits; 4bpp packs one pixel per nibble with the low nibble leftmost. No skill may state a different order — a wrong order mirrors generated art.
 - Hard limits are contractual (e.g. 50 particles per emitter, 8 audio voices) — when documenting APIs, keep the stated limits, header paths, and namespaces exact; these skills exist specifically to stop agents from hallucinating APIs.
 
 ## Keeping the Catalog Consistent

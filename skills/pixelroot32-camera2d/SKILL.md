@@ -61,6 +61,12 @@ map's screen extents with `graphics::cameraRangeFor(...)` and feed the resulting
 and the projection math live behind `PIXELROOT32_ENABLE_TILEMAP_PROJECTION` — see
 the **`pixelroot32-projection`** skill.
 
+A room graph built by the projected `buildRoomGraph` overload hands `enterRoom()`
+rects in that same signed screen space, so a room's `cameraMinX` may be negative
+under an isometric basis. `Camera2D` stores and clamps them as-is; do not
+"normalise" a negative room bound, and do not pass a room rect to `cameraRangeFor`
+(it is already a range).
+
 ### CameraTween
 
 **Header**: `include/graphics/CameraTween.h`

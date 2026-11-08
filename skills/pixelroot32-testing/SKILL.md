@@ -7,7 +7,7 @@ metadata:
   domain: tooling
   language: cpp
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.15.0"
 ---
 
 ## Overview
@@ -104,7 +104,7 @@ PIXELROOT32_ENABLE_DIALOG               PIXELROOT32_ENABLE_STATIC_LAYER_SNAPSHOT
 - `test_spatial_query`
 - `test_scene_depth_sort`
 - `test_static_layer_snapshot`
-- every `test_gameplay_*` suite (8 of them)
+- every `test_gameplay_*` suite (9 of them)
 - `test_tilemap_projected_draw`, `test_tilemap_projected_dirty_skip`
 - `test_dialog_types`, `test_dialog_box`, `test_gameplay_dialog_runner`, `test_dialog_gating_integration`
 - `test_physics_rest` (dual-mode: default env pins the threshold inert, `native_test_physics_rest` pins the snap)
@@ -360,7 +360,7 @@ Suites marked **‡** pass vacuously outside their module env (`native_test_netw
 |-----------|-------|-------------|
 | Camera | `pixelroot32-camera2d` | `test_camera2d`, `test_camera_effects`, `test_camera_tween`† |
 | Audio | `pixelroot32-audio` | `test_audio`, `test_audio_command_queue`, `test_audio_engine`, `test_audio_music_types`, `test_audio_scheduler`, `test_apu_core`, `test_music_player` |
-| Rendering | `pixelroot32-sprite-renderer` | `test_graphics`, `test_color`, `test_rgb444`, `test_compute_span_table`, `test_dirty_grid`, `test_dirty_grid_intersects_prev_dirty`, `test_sprite4bpp_framebuffer`, `test_static_tilemap_layer_cache`, `test_static_layer_snapshot`†, `test_font_manager`, `test_text_layout`, `test_display_config`, `test_tile_animation`, `test_tile_attributes`, `test_tile_attributes_unit`, `test_tile_mask`, `test_tile_consumption_helper`, `test_tilemap_foot_anchor` |
+| Rendering | `pixelroot32-sprite-renderer` | `test_graphics`, `test_color`, `test_rgb444`, `test_compute_span_table`, `test_span_table_2bpp`, `test_sprite2bpp_blit`, `test_dirty_grid`, `test_dirty_grid_intersects_prev_dirty`, `test_sprite4bpp_framebuffer`, `test_static_tilemap_layer_cache`, `test_static_layer_snapshot`†, `test_font_manager`, `test_text_layout`, `test_display_config`, `test_tile_animation`, `test_tile_attributes`, `test_tile_attributes_unit`, `test_tile_mask`, `test_tile_consumption_helper`, `test_tilemap_foot_anchor` |
 | Physics | `pixelroot32-physics` | `test_collision_primitives`, `test_collision_system`, `test_collision_types`, `test_physics_actor`, `test_physics_expansion`, `test_physics_scheduler`, `test_kinematic_actor`, `test_rigid_actor`, `test_sensor_actor`, `test_tile_collision_builder`, `test_tile_pixel_collision`, `test_rect`, `test_collision_segments`†, `test_physics_limits`, `test_physics_rest`, `test_position_correction` |
 | Networking | `pixelroot32-networking` | `test_net_backpressure`‡, `test_net_counter`‡, `test_net_counter_resync`‡, `test_net_data_path`‡, `test_net_engine_dispatch`‡, `test_net_flags`, `test_net_loopback`‡, `test_net_protocol`‡, `test_net_reliability`‡, `test_net_session_discovery`‡ |
 | Persistence | `pixelroot32-persistence` | `test_persist_codec`‡, `test_persist_contract`‡, `test_persist_flags`, `test_persist_hostfile`‡, `test_persist_service`‡ |

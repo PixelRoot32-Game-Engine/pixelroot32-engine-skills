@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: renderer
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.15.0"
   # No `feature_gate` key: the renderer subsystem itself is always compiled.
   # The optional sub-features it hosts are gated individually and documented in
   # the body: PIXELROOT32_ENABLE_DIRTY_REGIONS,
@@ -48,7 +48,7 @@ renderer.setContrast(200);               // Brightness 0-255
 **Header**: `include/graphics/Renderer.h`
 
 ```cpp
-// 1bpp Monochrome (16-bit row packing, bit 0 = leftmost pixel)
+// 1bpp Monochrome (one uint16_t per row, width <= 16; bit width-1 = leftmost pixel)
 struct Sprite mySprite = { data, 8, 8 };
 
 // 2bpp 4-color (per-pixel palette index)
@@ -60,6 +60,27 @@ Sprite4bpp sprite4 = { data, palette, 16, 16, 16 };
 // Multi-layer (1bpp layers composed)
 MultiSprite multi = { 16, 16, layers, 3 };  // 3 layers
 ```
+
+**Row layout — what a packer must emit.** Each format has one bit order, and it
+is the order the blit reads:
+
+| Format | Row storage | Bit order |
+|---|---|---|
+| `Sprite` (1bpp) | one `uint16_t`, `width <= 16` | bit `width - 1` = leftmost, bit 0 = rightmost |
+| `Sprite2bpp` | `(width * 2 + 7) / 8` bytes, 4 px/byte | pixel `col` in byte `col >> 2`, shift `(col & 3) * 2`; low bits = leftmost |
+| `Sprite4bpp` | `(width * 4 + 7) / 8` bytes, 2 px/byte | pixel `col` in byte `col >> 1`, low nibble = leftmost |
+
+For 1bpp that means a 16 px binary literal reads left to right as the row is
+drawn: `0b1000000000000000` lights only the leftmost pixel. Only the lowest
+`width` bits are used, so an 8 px sprite's leftmost pixel is bit 7. The
+documented order is the renderer's order — every 1bpp path (sprite, scaled
+sprite, `MultiSprite`, fonts, 1bpp tilemaps) has always drawn it this way, and
+1.15.0 corrected the API docs that claimed the opposite.
+
+**Read 2bpp rows byte by byte.** The blit fetches one byte per 4 pixels through
+`PIXELROOT32_READ_BYTE_P`; never `reinterpret_cast` a row to `uint16_t*`. The row
+stride is byte-granular, so a 16-bit read reaches one byte past the sprite when
+`width % 8` is 1..4, and it is unaligned whenever the stride is odd.
 
 ### Drawing
 
@@ -353,7 +374,7 @@ Hard contracts:
 
 ```cpp
 void computeSpanTable(Sprite4bpp& s, uint8_t* outMinX, uint8_t* outMaxX);   // :55
-void computeSpanTable(Sprite2bpp& s, uint8_t* outMinX, uint8_t* outMaxX);   // :64
+void computeSpanTable(Sprite2bpp& s, uint8_t* outMinX, uint8_t* outMaxX);   // :67
 ```
 
 Both take the sprite by **non-const reference** and return **`void`**. The results
@@ -363,9 +384,16 @@ land in the two caller-owned arrays, which the sprite then points at:
 const uint8_t* rowMinX = nullptr;   ///< per-row opaque span start; nullptr = full bbox
 const uint8_t* rowMaxX = nullptr;   ///< one past last col;         nullptr = full bbox
 ```
-(`Renderer.h:65-68` for `Sprite2bpp`, `:81-84` for `Sprite4bpp` — identical text.)
+(`Renderer.h:68-70` for `Sprite2bpp`, `:84-86` for `Sprite4bpp` — identical text.)
 
 Contracts:
+
+- **Reads the blit's bit order.** The 2bpp overload scans pixel `col` at byte
+  `col >> 2`, shift `(col & 3) * 2` (low bits = leftmost), the same layout the
+  2bpp blit draws; the 4bpp overload scans low nibble first. A table computed
+  this way never clips the row's opaque edge pixels. Before engine 1.15.0 the
+  2bpp overload read the bytes MSB-first and did clip them, so a table
+  precomputed by an older engine does not match today's blit.
 
 - **Lifetime** (`:14-20`): the function writes into caller-provided `uint8_t[height]`
   arrays; the sprite holds **non-owning** pointers to them. The buffers must outlive
@@ -377,8 +405,8 @@ Contracts:
 - **Over-approximation** (`:20-25`): only leading and trailing transparent runs are
   skipped. Interior transparent pixels inside `[rowMinX, rowMaxX)` are still iterated.
 - A fully transparent row yields `{ minX = 0, maxX = 0 }` (`:27-30`).
-- **`flipX` bypasses the span limits entirely** — `src/graphics/Renderer.cpp:747-758`
-  (4bpp) and `:638` (2bpp): the mirrored layout invalidates the precomputed
+- **`flipX` bypasses the span limits entirely** — `src/graphics/Renderer.cpp:762`
+  (4bpp) and `:642` (2bpp): the mirrored layout invalidates the precomputed
   min/max, so a flipped draw walks the full bounding box. Never budget a
   performance win for flipped sprites.
 
@@ -390,9 +418,14 @@ spr.rowMaxX = maxX;                       // <-- and this
 ```
 
 **ESP32**: sprite structs are usually flash-resident and cannot be mutated in place.
+`SpanTable.h` documents only the lifetime contract (the arrays are caller-owned);
+the flash-residency workaround is the consumer's own pattern.
 `graphics/iso_dungeon/src/IsoDungeonScene.cpp` (in PixelRoot32-Demo-Projects) uses `const_cast` and gates the
-wiring for ESP32 (documented at `SpanTable.h:37-43`). Copy the sprite struct into RAM
+wiring for ESP32. Copy the sprite struct into RAM
 or follow that gating pattern; do not assign `rowMinX`/`rowMaxX` on a flash object.
+An editor-exported isometric tileset ships its span tables in flash already, so
+it needs neither a `computeSpanTable` pass nor a `const_cast` — see
+`pixelroot32-tilemap-editor-export`.
 
 ### 12-bit colour (Rgb444)
 
@@ -509,7 +542,7 @@ renderer.setSpritePaletteSlotContext(0xFF);  // Disable context
 1. **Palette pointers must be static**: `setCustomPalette()`, `setBackgroundCustomPaletteSlot()` do not copy the palette array — the pointer must remain valid.
 2. **`Color::Transparent` is not a real color**: Resolving it or using it in draw primitives is a no-op. It's a sentinel value (255).
 3. **TileAttribute data is PROGMEM**: Always use `PIXELROOT32_STRCMP_P()` for key comparison and `PIXELROOT32_MEMCPY_P()` to read values.
-4. **Sprite format**: `Sprite` data is packed 16-bit rows. Bit 0 is the leftmost pixel. Only the lowest `width` bits are used.
+4. **Sprite format**: `Sprite` data is packed 16-bit rows. Bit `width - 1` is the leftmost pixel and bit 0 the rightmost; only the lowest `width` bits are used. `Sprite2bpp` packs 4 pixels per byte (low bits = leftmost); `Sprite4bpp` one pixel per nibble (low nibble = leftmost).
 5. **LayerType::Static**: Marking a tilemap as static tells the dirty system not to mark individual cells — the layer is assumed to cover the full viewport.
 6. **Dirty regions and stacked scenes**: When stacking scenes, at least one scene must NOT advise framebuffer clear suppression, or all stacked scenes must collectively cover the framebuffer.
 7. **Dual palette**: Must call `enableDualPaletteMode(true)` before setting separate background/sprite palettes — otherwise both get the same palette.
