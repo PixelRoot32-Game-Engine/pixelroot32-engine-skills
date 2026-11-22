@@ -9,7 +9,7 @@ metadata:
   module: projection
   feature_gate: PIXELROOT32_ENABLE_PROJECTION
   platform: cross-platform
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview

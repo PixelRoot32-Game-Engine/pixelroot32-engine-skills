@@ -7,7 +7,7 @@ metadata:
   domain: tooling
   language: cpp
   platform: cross-platform
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview
@@ -30,6 +30,9 @@ pinned on, default build pins it inert), `[env:native_test_networking]`
 `test_native_sdl_teardown`, issue #273). Every other section (`[base]`, `[base_esp32]`,
 `[base_native]`, `[profile_*]`, `[native_*]`, `[esp32_*]`) is a **template without the
 `env:` prefix and cannot be passed to `-e`**.
+
+`PIXELROOT32_ENABLE_SD_STORAGE` is ESP32-only and has **no native test environment**: the
+microSD adapter's shared contract suite runs on hardware, not in CI. See "Board Smoke".
 
 ```bash
 # Run the flags-off suite set (default contract)
@@ -56,11 +59,16 @@ pio test -e native_test_gameplay -f "test_gameplay_grid_space"
 # Run with verbose output
 pio test -e native_test --verbose
 
-# Generate coverage (Windows)
-python scripts/coverage_win.py --report
+# Generate coverage (Windows: prefers gcovr, falls back to lcov)
+python3 scripts/coverage_win.py --report
 
-# Generate coverage (Linux)
-python scripts/coverage_linux.py --report
+# Generate coverage (Linux: lcov + genhtml)
+python3 scripts/coverage_linux.py --report
+
+# Generate coverage on macOS: install gcovr (`pip install gcovr`) and use the
+# gcovr path, since Apple's clang has no libgcov. `native_test` instruments
+# coverage through scripts/platformio_native_coverage.py.
+python3 scripts/coverage_win.py --report
 ```
 
 > **`-t` is NOT a suite selector.** `AGENTS.md:144` documents
@@ -80,11 +88,11 @@ stub branch — **the suite passes without asserting anything (a vacuous pass).*
 | Environment | Purpose | Gameplay/projection flags |
 |-------------|---------|---------------------------|
 | `[env:native_test]` (`platformio.ini:90`) | Proves the **flags-off contract**: no behavior change for existing examples | all default (off) |
-| `[env:native_test_gameplay]` (`platformio.ini:136`) | `extends = env:native_test`; **the only place the gameplay capability assertions actually execute** | 13 flags forced to `1` |
-| `[env:native_test_physics_rest]` (`platformio.ini:163`) | Pins the rest-threshold snap with `PHYSICS_REST_THRESHOLD` on (default build pins it inert) | rest threshold on |
-| `[env:native_test_networking]` (`platformio.ini:176`) | `extends = env:native_test`; **the only place the networking assertions execute** | `PIXELROOT32_ENABLE_NETWORKING=1` |
-| `[env:native_test_persistence]` (`platformio.ini:185`) | `extends = env:native_test`; **the only place the persistence assertions execute** | `PIXELROOT32_ENABLE_PERSISTENCE=1` |
-| `[env:native_test_sdl_teardown]` (`platformio.ini:195`) | `extends = env:native_test` with `test_filter = test_native_sdl_teardown`: the SDL init/quit suite owns its process; headless via SDL's dummy video/audio drivers | defaults |
+| `[env:native_test_gameplay]` (`platformio.ini:139`) | `extends = env:native_test`; **the only place the gameplay capability assertions actually execute** | 13 flags forced to `1` |
+| `[env:native_test_physics_rest]` (`platformio.ini:166`) | Pins the rest-threshold snap with `PHYSICS_REST_THRESHOLD` on (default build pins it inert) | rest threshold on |
+| `[env:native_test_networking]` (`platformio.ini:179`) | `extends = env:native_test`; **the only place the networking assertions execute** | `PIXELROOT32_ENABLE_NETWORKING=1` |
+| `[env:native_test_persistence]` (`platformio.ini:188`) | `extends = env:native_test`; **the only place the persistence assertions execute** | `PIXELROOT32_ENABLE_PERSISTENCE=1` |
+| `[env:native_test_sdl_teardown]` (`platformio.ini:198`) | `extends = env:native_test` with `test_filter = test_native_sdl_teardown`: the SDL init/quit suite owns its process; headless via SDL's dummy video/audio drivers | defaults |
 
 `[env:native_test_gameplay]` adds exactly these 13 `-D` flags, all `=1`:
 
@@ -117,7 +125,7 @@ and only asserts under `-e native_test_networking`; every `test_persist_*` suite
 `-e native_test_persistence`. The two `*_flags` suites are dual-mode: they assert the flag
 matches the build in both envs (off under `native_test`, on under the module env).
 
-Rationale is stated in-repo at `platformio.ini:135-140`. A green `native_test` run is **not**
+Rationale is stated in-repo at `platformio.ini:133-138`. A green `native_test` run is **not**
 evidence that a flag-gated capability works — always re-run the affected suite under
 `native_test_gameplay` before claiming a gameplay/projection change is covered.
 
@@ -146,7 +154,7 @@ test/
 ```
 
 `test/unit/` currently holds **109 suite directories**. `[env:native_test]` selects them plus a
-fixed set of integration suites (`platformio.ini:101`), including `test_dialog_gating_integration`:
+fixed set of integration suites (`platformio.ini:106`), including `test_dialog_gating_integration`:
 
 ```ini
 test_filter = unit/*, test_player_jump_integration, test_background_palette_render_integration,
@@ -309,15 +317,23 @@ Available helpers:
 ## Coverage Scripts
 
 ```bash
-# Windows with gcovr
-python scripts/coverage_win.py --report
+# Windows with gcovr (falls back to lcov)
+python3 scripts/coverage_win.py --report
 
-# Linux with lcov
-python scripts/coverage_linux.py --report
+# Linux with lcov + genhtml
+python3 scripts/coverage_linux.py --report
+
+# macOS: gcovr path (`pip install gcovr`); clang has no libgcov
+python3 scripts/coverage_win.py --report
 
 # Skip tests, only generate report
-python scripts/coverage_win.py --no-tests --report
+python3 scripts/coverage_win.py --no-tests --report
 ```
+
+Coverage instrumentation itself lives in `scripts/platformio_native_coverage.py`, wired
+into `[env:native_test]`: it adds `--coverage` to build and link flags on every host and
+`-lgcov` only off Darwin. Since 1.16.0 `native_test` builds and reports coverage on macOS;
+Linux CI keeps `-lgcov`, which `lcov` depends on.
 
 ## Platform-Specific Tests
 
@@ -329,6 +345,22 @@ void test_esp32_audio_dac(void) {
 }
 #endif
 ```
+
+## Board Smoke
+
+Some adapters only exist on hardware and cannot be covered by `native_test`. Run them on a
+board before claiming the path works:
+
+| Adapter | Build | Smoke |
+|---|---|---|
+| ESP32 NVS | `examples/persistence` `esp32dev` | `tools/persist_nvs_smoke` (partition and reflash caveats) |
+| microSD slots | `examples/persistence` `esp32sd` (CYD: panel on HSPI, card on VSPI) | `tools/persist_sd_smoke` — interactive serial stage that asks for the card to be pulled and reinserted, then checks the re-mount and a record seeded before the removal, without a reboot |
+
+The microSD adapter's shared contract suite is compiled into the `tools/persist_sd_smoke`
+build (`pio test -e smoke`, `test_filter = unit/test_persist_contract`), and the same tool's
+`pio run -e smoke -t upload` runs the hot swap. `examples/persistence`'s `esp32sd` build
+only demonstrates the adapter end to end. There is no `native_test_sd_*` environment
+because the Arduino `SD`/FATFS stack is ESP32-only.
 
 ## Best Practices
 

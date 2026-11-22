@@ -8,7 +8,7 @@ metadata:
   subsystem: input
   module: touch
   platform: cross-platform
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview

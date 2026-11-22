@@ -7,7 +7,7 @@ metadata:
   domain: engine
   subsystem: core
   module: scene-manager
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
   platform: cross-platform
 ---
 

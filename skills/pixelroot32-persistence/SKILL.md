@@ -1,6 +1,6 @@
 ---
 name: pixelroot32-persistence
-description: The PixelRoot32 persistence module — IKeyValueStore/ISlotStore storage models, StoreResult error model, RecordCodec 16-byte CRC-32 envelope, PersistenceService roles and record helpers, and the ESP32 NVS, host-file and in-memory adapters. Use when saving settings, high scores, unlocks or save slots, migrating a record schema, or testing save code without hardware.
+description: The PixelRoot32 persistence module — IKeyValueStore/ISlotStore storage models, StoreResult error model, RecordCodec 16-byte CRC-32 envelope, PersistenceService roles and record helpers, and the ESP32 NVS, microSD, host-file and in-memory adapters. Use when saving settings, high scores, unlocks or save slots, including on a microSD card, migrating a record schema, or testing save code without hardware.
 license: MIT
 compatibility: opencode>=0.1.0
 metadata:
@@ -9,7 +9,7 @@ metadata:
   module: persistence
   feature_gate: PIXELROOT32_ENABLE_PERSISTENCE
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview
@@ -26,31 +26,37 @@ PersistenceService  ------------------  RecordCodec (envelope + CRC-32)
           ^
 Adapters (one per medium)
    |-- Esp32NvsKeyValueStore / Esp32NvsSlotStore   drivers/esp32   (ESP32)
+   |-- SdSlotStore                                 drivers/esp32   (ESP32 + SD)
    |-- HostFileKeyValueStore / HostFileSlotStore   drivers/native  (PLATFORM_NATIVE)
    `-- MemoryKeyValueStore   / MemorySlotStore     persistence/    (any target)
 ```
 
 Game logic talks only to `IKeyValueStore&` / `ISlotStore&`; which medium sits behind
-them is decided once, where the stores are constructed. A new medium (SD, EEPROM) adds an
-adapter and touches neither the interfaces nor game code. Adapters move opaque bytes;
-`RecordCodec` is the one place a record is validated.
+them is decided once, where the stores are constructed. A new medium adds an adapter and
+touches neither the interfaces nor game code. Adapters move opaque bytes; `RecordCodec`
+is the one place a record is validated.
 
 **`Engine` owns none of it.** The game constructs its stores and the service, calls each
 adapter's `init()`, and binds the stores at setup. **The engine never writes on its own:**
 every set, erase and `commit()` is a call the game makes. Reference implementation:
 `examples/persistence` (one settings record + one save slot, every `StoreResult` printed,
-same scene on ESP32 and native).
+same scene on ESP32 and native); its `esp32sd` environment keeps settings in NVS and moves
+the save slots to a microSD card.
 
-**One flag gates the whole module**: `PIXELROOT32_ENABLE_PERSISTENCE`, default `0`. With
-it off every header body compiles to nothing — no symbols, no `Engine` bytes, no `Scene`
-vtable change. There are no other macros: capacities are constructor arguments or
-template parameters. Mirrors: `pixelroot32::platforms::config::EnablePersistence`
-(`include/platforms/EngineConfig.h`) and `pixelroot32::modules::Persistence`
-(`include/core/EngineModules.h`).
+**Two flags gate the module.** `PIXELROOT32_ENABLE_PERSISTENCE`, default `0`, is the
+module gate: with it off every header body compiles to nothing — no symbols, no `Engine`
+bytes, no `Scene` vtable change. `PIXELROOT32_ENABLE_SD_STORAGE`, default `0`, adds the
+microSD adapter only; it requires the module flag and an ESP32 target, and the build fails
+with a named `#error` when either is missing. Capacities stay constructor arguments or
+template parameters. Mirrors: `pixelroot32::platforms::config::EnablePersistence` /
+`EnableSdStorage` (`include/platforms/EngineConfig.h`) and
+`pixelroot32::modules::Persistence` (`include/core/EngineModules.h`).
 
 ```ini
 build_flags =
     -D PIXELROOT32_ENABLE_PERSISTENCE=1
+    ; ESP32 only, and only when the saves live on a microSD card:
+    -D PIXELROOT32_ENABLE_SD_STORAGE=1
 ```
 
 ## Key APIs
@@ -131,7 +137,10 @@ public:
 - Out-of-range slot → `InvalidArgument` before the medium is touched.
 - Empty slot → `NotFound` with `stored = 0`. A zero-size record **occupies** its slot.
 - **`write()` is replace-or-keep**: after a failed or interrupted write, `read()` returns
-  the previous record or the new one, never a mix.
+  the previous record or the new one, never a mix. The one exception the interface allows
+  is a medium that cannot replace atomically: on FAT (`SdSlotStore`) a power loss between
+  the remove and the rename can also leave the slot empty (`NotFound`), while the record
+  envelope rejects a torn file as `Corrupt`.
 - `write()` above `maxRecordSize()` → `TooLarge`. There is no `commit()` on slots.
 
 ### RecordCodec — the self-checking envelope
@@ -210,15 +219,80 @@ public:
 - **Never calls `commit()`** — `saveSettingRecord()` may leave the blob volatile until the
   game calls `settings().commit()`. Size: four pointers, 16 B on ESP32.
 
+### SdConfig — microSD mount config
+
+**Header** `include/drivers/esp32/SdConfig.h` · **Namespace**
+`pixelroot32::persistence` · **Feature gates** `PIXELROOT32_ENABLE_PERSISTENCE` +
+`PIXELROOT32_ENABLE_SD_STORAGE` + `defined(ESP32)`
+
+```cpp
+struct SdConfig {
+    SPIClass* spi = nullptr;      // required: &SPI, &HSPI, &VSPI, ...
+    int sck = -1;                 // -1 = bus default
+    int miso = -1;
+    int mosi = -1;
+    int cs = -1;                  // required on most boards
+    uint32_t frequencyHz = 4000000;
+};
+```
+
+Plain data: the adapter owns no board pin and no board assumption. `-1` means the bus
+default for that signal; `spi` and `cs` must be real values. On a CYD-class board the
+panel and the card need **different SPI hosts** (the example moves the panel to HSPI);
+`SD.begin()` reconfigures the host it is given.
+
+### SdSlotStore — save slots on a microSD card
+
+**Header** `include/drivers/esp32/SdStore.h` · **Namespace**
+`pixelroot32::persistence` · **Feature gates** `PIXELROOT32_ENABLE_PERSISTENCE` +
+`PIXELROOT32_ENABLE_SD_STORAGE` + `defined(ESP32)`
+
+```cpp
+SdSlotStore(const char* rootDir, const char* prefix, uint16_t slots,
+            size_t maxRecordBytes) noexcept;   // strings must outlive the object
+StoreResult init(const SdConfig& config) noexcept;  // mounts or re-mounts; never formats
+```
+
+- **Files**: one per slot at `<rootDir>/<prefix>/<i>.slot` (`2.slot`); a missing file is
+  an empty slot. `rootDir` is relative to the Arduino SD mountpoint (`/sd` by default),
+  non-empty and starts with `/`; `prefix` must pass `isValidKey()`. Paths are held by
+  pointer, so string literals are the intended use; `kSdMaxPathBytes` is `160`.
+- **`init(config)`** brings up the bus, mounts the card and creates the directories
+  (`mkdir` on an existing directory is not an error). It **never formats, erases or
+  repairs** the card. Until it returns `Ok`, every other call answers `Unavailable`, so a
+  game boots on defaults when the card is missing (`init()` itself answers
+  `InvalidArgument`/`InvalidKey` for bad arguments).
+- **Reinsert**: calling `init()` again after the card was removed releases the dead volume
+  and mounts again (`SD.end()` first, because `SDFS::begin()` is a no-op while a volume is
+  registered), so no reboot is needed. A removal itself is not visible up front: the
+  Arduino `SD` library caches the card type at mount, so the first access after pulling
+  the card answers `IoError` (or `NotFound` for a missing file).
+- **Errors**: missing file `NotFound`; full card `NoSpace`; a file that fails to open or
+  read, or any other I/O failure, `IoError` (never a silent `NotFound`); uninitialised
+  store `Unavailable`; out-of-range slot or null buffer with non-zero capacity
+  `InvalidArgument`; record above `maxRecordSize()` `TooLarge`. A torn but readable file
+  opens `Ok` and is rejected later by the codec as `Corrupt`.
+- **No `commit()`**: every write is flushed and in place.
+- **Replace-or-keep on FAT**: write to `<file>.tmp`, flush (`fsync`), close, remove the old
+  file, `rename` the temp. A power loss keeps the old record, leaves the new one, leaves a
+  torn record the codec rejects as `Corrupt`, or — between the removal and the rename —
+  leaves an empty slot (`NotFound`).
+- **Timestamps**: the adapter never reads one. FAT has no date before 1980, so card files
+  show 1980 until the game calls `configTime()` or copies the time from an RTC.
+- **Memory**: no heap of its own, fixed stack buffers per call; the FATFS driver the
+  Arduino `SD` library brings in costs several KB of RAM.
+
 ### Adapters
 
 | Adapter | Header | Extra guard | Medium | `commit()` |
 |---|---|---|---|---|
 | `Esp32NvsKeyValueStore`, `Esp32NvsSlotStore` | `include/drivers/esp32/Esp32NvsStore.h` | `defined(ESP32)` | One ESP-IDF NVS namespace | `nvs_commit` |
+| `SdSlotStore` | `include/drivers/esp32/SdStore.h` | `PIXELROOT32_ENABLE_SD_STORAGE && defined(ESP32)` | One FAT file per slot | — (no `commit()`) |
 | `HostFileKeyValueStore`, `HostFileSlotStore` | `include/drivers/native/HostFileStore.h` | `defined(PLATFORM_NATIVE)` | One file per key / slot | `Ok` (writes already in place) |
 | `MemoryKeyValueStore<Entries, BlobBytes>`, `MemorySlotStore<Slots, RecordBytes>` | `include/persistence/MemoryStores.h` | — | Fixed in-RAM tables | Counts, `Ok` |
 
-All live in `pixelroot32::persistence` behind `PIXELROOT32_ENABLE_PERSISTENCE`.
+All live in `pixelroot32::persistence` behind `PIXELROOT32_ENABLE_PERSISTENCE`; the SD row
+also needs `PIXELROOT32_ENABLE_SD_STORAGE` and an ESP32 target.
 
 ```cpp
 // ESP32 NVS — namespace/prefix must pass isValidKey(); limits must be non-zero
@@ -228,6 +302,11 @@ Esp32NvsSlotStore(const char* nameSpace, const char* prefix, uint16_t slots,
                   size_t maxRecordBytes, const char* partition = kNvsDefaultPartition) noexcept;
 StoreResult init() noexcept;           // both; Ok also when already open; NEVER erases
 size_t maxBlobSize() const noexcept;   // KV only
+
+// microSD — ESP32 only; needs both flags; strings must outlive the object
+SdSlotStore(const char* rootDir, const char* prefix, uint16_t slots,
+            size_t maxRecordBytes) noexcept;
+StoreResult init(const SdConfig& config) noexcept;   // mounts or re-mounts; never formats
 
 // Native host files — strings are copied; init() creates the directories
 HostFileKeyValueStore(const char* rootDir, const char* nameSpace, size_t maxBlobBytes) noexcept;
@@ -256,6 +335,11 @@ uint32_t writes() const;   uint32_t commits() const;      // commits(): key-valu
   `<file>.tmp`, then one replace-existing move (`MoveFileExA` on Windows, `rename()` on
   POSIX). A malformed file reads as `IoError`, never a silent `NotFound`. Paths live in
   fixed buffers of `kHostFileMaxPathBytes` (260).
+- **microSD**: `rootDir`/`prefix` are held by pointer and must outlive the store. `init()`
+  mounts and re-mounts; a failed mount leaves the role unbound and the game on defaults.
+  A pulled card is only visible on the next access (`IoError`/`NotFound`). The adapter
+  never formats and never reads a timestamp. FAT's non-atomic replace is the documented
+  exception to replace-or-keep.
 
 ## Wiring a Game
 
@@ -291,6 +375,26 @@ void MyScene::init() {
 ```
 
 Only the store definitions differ per platform; everything else goes through the service.
+
+On an ESP32 board with a card, keep settings in NVS and move only the save slots to the
+card (`examples/persistence`'s `esp32sd` environment):
+
+```cpp
+#if defined(ESP32) && PIXELROOT32_ENABLE_SD_STORAGE
+#include <drivers/esp32/SdConfig.h>
+#include <drivers/esp32/SdStore.h>
+
+persist::Esp32NvsKeyValueStore settingsStore_{"mygame", 64};
+persist::SdSlotStore           saveStore_{"/pr32", "save", 3, 256};
+const persist::SdConfig        sdConfig_{&SPI, -1, -1, -1, /* cs */ 5, 4000000};
+
+void MyScene::init() {
+    Scene::init();
+    if (settingsStore_.init() == persist::StoreResult::Ok) persistence_.bindSettings(&settingsStore_);
+    if (saveStore_.init(sdConfig_) == persist::StoreResult::Ok) persistence_.bindSaves(&saveStore_);
+}
+#endif
+```
 
 ## Schema Versioning
 
@@ -332,6 +436,11 @@ live outside any single scene so a scene switch does not destroy the bound store
 RAM while the menu is open; on leaving the screen do one `saveSettingRecord()` + one
 `settings().commit()`, then apply volume/brightness. Never save on every slider tick.
 
+**Settings in NVS, saves on the card (`examples/persistence` `esp32sd`).** Bind the NVS
+key-value store for settings and `SdSlotStore` for saves. The card can fail to mount and
+the game still runs: settings load from NVS and the saves role stays unbound
+(`Unavailable`), so the slot menu shows empty slots instead of crashing.
+
 **Continue / slot menu.** `saves().query(slot, size)` tells used vs empty per slot without
 reading; `saveRecord()` / `loadRecord()` for the content; `saves().erase(slot)` for
 "Delete".
@@ -344,8 +453,12 @@ reading; `saveRecord()` / `loadRecord()` for the content; `saves().erase(slot)` 
 the game survives `IoError`, `corruptByte()` proves it falls back on `Corrupt`, and
 `writes()` / `commits()` pin that it saves — and commits — exactly when it should. The
 engine's suites run with `pio test -e native_test_persistence`
-(`test_persist_codec`, `_contract`, `_service`, `_hostfile`, `_flags`); NVS is exercised on
-the board through `tools/persist_nvs_smoke`.
+(`test_persist_codec`, `_contract`, `_service`, `_hostfile`, `_flags`). NVS is exercised on
+the board through `tools/persist_nvs_smoke`; the microSD adapter has no native test
+environment (ESP32 only), so its shared contract suite and the hot-swap path run on
+hardware through `tools/persist_sd_smoke` (`pio test -e smoke` for the contract suite,
+`pio run -e smoke -t upload` for the hot swap), with `examples/persistence`'s `esp32sd`
+build demonstrating the adapter end to end.
 
 ## ESP32 Constraints
 
@@ -362,7 +475,16 @@ the board through `tools/persist_nvs_smoke`.
   `Esp32NvsSlotStore` 28 B; no heap on the device path. Two NVS KV stores linked on the
   CYD: `.dram0.bss` +48 B, flash +2,760 B text, +680 B rodata. Flag off: 0 B.
 - **NVS is for small records** — the CYD's 24 KB `nvs` partition holds about 20 KB of
-  data. Large saves need a future raw-partition/SD adapter (not shipped).
+  data. Large saves belong on the microSD adapter (`SdSlotStore`, 1.16.0); a raw flash
+  partition adapter is not shipped.
+- **microSD costs**: the FATFS driver the Arduino `SD` library brings in costs several KB
+  of RAM, and `SD.begin()` reconfigures the SPI host it is given — keep the display and
+  the card on separate hosts (the CYD example moves the panel to HSPI). The adapter
+  itself has no heap and holds only two pointers plus the limits. The default clock is
+  4 MHz; raise `frequencyHz` only after the wiring supports it.
+- **Removable media**: a missing card is `Unavailable` and leaves the saves role unbound,
+  so the game boots on defaults. Calling `init()` again re-mounts after reinsertion; a
+  removal is only seen on the next access. Never format from engine-style code.
 - **`init()` never erases** the partition; an unusable one answers `Corrupt`.
 - **`Preferences` compatibility**: a blob written by Arduino `Preferences::putBytes(key, …)`
   in namespace N reads back byte-identically through `getBlob()` over namespace N, and the
@@ -377,8 +499,9 @@ the board through `tools/persist_nvs_smoke`.
 ## Gotchas
 
 - **Missing flag = empty headers.** Without `-D PIXELROOT32_ENABLE_PERSISTENCE=1` every
-  type is undefined; the NVS header additionally needs `ESP32`, the host-file header
-  `PLATFORM_NATIVE` — include them under matching `#if defined(...)` guards.
+  type is undefined; the NVS header additionally needs `ESP32`, the microSD header needs
+  `ESP32` plus `PIXELROOT32_ENABLE_SD_STORAGE`, the host-file header `PLATFORM_NATIVE` —
+  include them under matching `#if defined(...)` guards.
 - **Forgetting `init()`** on an NVS or host-file store makes every call `Unavailable`.
   Memory stores have no `init()`.
 - **`settings().commit()` is your job.** The service never commits.
@@ -394,8 +517,19 @@ the board through `tools/persist_nvs_smoke`.
   `init()` has run, and `Esp32NvsSlotStore`'s prefix must outlive the object — use string
   literals. Host-file stores copy their strings.
 - **Share no namespace** with unrelated data, and keep `<prefix><slots-1>` within 15 chars.
-- **Host-file POSIX path** (`rename`, `fsync`, `ENOSPC`) has not yet been run outside
-  Windows.
+- **Host-file POSIX path** (`rename`, `fsync`, `ENOSPC`) runs in the Linux CI
+  `native_test_persistence` suite and builds on macOS since 1.16.0; Windows remains the
+  platform with the most mileage.
+- **microSD strings must outlive the store**: `rootDir` and `prefix` are held by pointer;
+  use string literals, not locals. `rootDir` must start with `/`.
+- **A pulled card is not detected up front**: the first access answers `IoError`/
+  `NotFound`; call `init()` again to re-mount.
+- **FAT timestamps start at 1980**: call `configTime()` or copy the RTC time if the game
+  shows dates.
+- **FAT replace is not atomic**: a power loss in the remove-then-rename window can leave
+  the slot empty (`NotFound`), not only the old or new record.
+- **Never format the card** and never share the SPI host with the display unless the board
+  wires it that way.
 - **Not thread-safe.** Every call comes from the game-loop task; a game saving from
   another task must serialise access itself.
 
@@ -433,12 +567,18 @@ const bool used = persistence_.saves().query(i, size) == persist::StoreResult::O
 ## Agent Constraints
 
 - **Never write persistence code without `-D PIXELROOT32_ENABLE_PERSISTENCE=1`** in the
-  game's `platformio.ini` (default `0`), and guard adapter includes with
-  `defined(ESP32)` / `defined(PLATFORM_NATIVE)`.
+  game's `platformio.ini` (default `0`), add `-D PIXELROOT32_ENABLE_SD_STORAGE=1` only for
+  the microSD slot store on ESP32, and guard adapter includes with `defined(ESP32)` /
+  `defined(PLATFORM_NATIVE)`.
+- **microSD is ESP32-only and needs both flags.** Never enable
+  `PIXELROOT32_ENABLE_SD_STORAGE` without `PIXELROOT32_ENABLE_PERSISTENCE=1`; the build
+  fails with a named `#error` otherwise. Never format or erase the card, and never assume
+  a timestamp.
 - **Never invent APIs.** There is no `IFileStore`, no float/string/`int64` getter or
   setter, no automatic migration, no auto-save/background flush, no `Engine` accessor for
-  persistence, no `PersistenceService::commit()`, no SD/EEPROM/raw-partition adapter, and
-  no limit macros (capacities are constructor/template arguments).
+  persistence, no `PersistenceService::commit()`, no EEPROM/raw-partition adapter, and no
+  limit macros (capacities are constructor/template arguments). The microSD adapter is
+  `SdSlotStore`, ESP32 only, behind `PIXELROOT32_ENABLE_SD_STORAGE`.
 - **Never write, erase or commit from the per-frame path**, audio callbacks or timers.
   Saves are discrete, player-driven events at safe points; group the sets of one save and
   `commit()` once.

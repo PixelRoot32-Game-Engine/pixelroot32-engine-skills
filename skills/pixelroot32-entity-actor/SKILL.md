@@ -7,7 +7,7 @@ metadata:
   domain: engine
   subsystem: core
   module: entity-actor
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
   platform: cross-platform
 ---
 
@@ -197,6 +197,11 @@ class Player : public pixelroot32::physics::KinematicActor {
     }
 };
 ```
+
+The engine's `examples/platformer` puts the three types together in one scene:
+`KinematicActor` is the character, `RigidActor` the crates and `StaticActor` the level,
+with the collision matrix stated on both sides in `GameLayers.h` and one-way platforms via
+`setOneWay(true)`. Read it before inventing a layer/mask scheme.
 
 ### Sensor trigger zone
 ```

@@ -8,7 +8,7 @@ metadata:
   subsystem: graphics
   module: renderer
   platform: cross-platform
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
   # No `feature_gate` key: the renderer subsystem itself is always compiled.
   # The optional sub-features it hosts are gated individually and documented in
   # the body: PIXELROOT32_ENABLE_DIRTY_REGIONS,

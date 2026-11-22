@@ -9,7 +9,7 @@ metadata:
   module: core
   feature_gate: PIXELROOT32_ENABLE_AUDIO
   platform: cross-platform
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview

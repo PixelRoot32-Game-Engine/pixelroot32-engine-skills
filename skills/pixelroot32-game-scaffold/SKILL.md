@@ -6,7 +6,7 @@ compatibility: opencode>=0.1.0
 metadata:
   domain: engine
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview
@@ -126,7 +126,7 @@ extra_configs = lib/platformio.ini
 [env:native]
 extends = base_native
 lib_deps =
-    gperez88/PixelRoot32-Game-Engine@^1.15.0
+    gperez88/PixelRoot32-Game-Engine@^1.16.0
 build_flags =
     ${base_native.build_flags}
     -D PHYSICAL_DISPLAY_WIDTH=240
@@ -283,7 +283,7 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 
 | Fork | Options | Rule |
 |------|---------|------|
-| Engine dependency | inside engine repo vs standalone | Inside engine repo → `lib_deps = symlink://<relative path to engine root>`. Standalone (Demo-Projects) → registry `lib_deps = gperez88/PixelRoot32-Game-Engine@^1.15.0`, or git `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>`. |
+| Engine dependency | inside engine repo vs standalone | Inside engine repo → `lib_deps = symlink://<relative path to engine root>`. Standalone (Demo-Projects) → registry `lib_deps = gperez88/PixelRoot32-Game-Engine@^1.16.0`, or git `lib_deps = PixelRoot32-Game-Engine=https://github.com/PixelRoot32-Game-Engine/PixelRoot32-Game-Engine.git#<ref>`. |
 | Platforms | native only / +esp32dev / +esp32s3 | Always include `native`; add ESP32 envs + matching `platforms/*.h` as needed. |
 | Audio | with / without | With audio, add `SDL2_AudioBackend` + `Engine(config, inputConfig, audioConfig)` (see `games/snake/src/platforms/native.h` in Demo-Projects). Without, `Engine(config, inputConfig)`. |
 | Display | ST7735 (128×128) / ST7789 (240×240) / OLED | Pick `DisplayType` + TFT flags + `PHYSICAL_DISPLAY_WIDTH/HEIGHT`. `OLED_SSD1306`/`OLED_SH1106` use U8g2 (`-D PIXELROOT32_USE_U8G2_DRIVER`, I2C pin ctor — see `games/flappy_bird/src/platforms/esp32_c3.h` in Demo-Projects). |
@@ -292,6 +292,7 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 | Feature gates | `PIXELROOT32_ENABLE_*` | Pass as `-D PIXELROOT32_ENABLE_<X>=1` on the env `build_flags`. Consult `examples/README.md` "Where each opt-in capability is demonstrated" before enabling. |
 | Networking (ESP-NOW multiplayer) | off / on | Off by default (`PIXELROOT32_ENABLE_NETWORKING` = 0 in `include/platforms/PlatformDefaults.h`; no symbols, no Engine bytes when off). Opt in with `-D PIXELROOT32_ENABLE_NETWORKING=1` on each env that needs it. Only ESP32 and `native` support it — any other target fails with `#error`. API: `pixelroot32-networking`. |
 | Persistence (settings / save slots) | off / on | Off by default (`PIXELROOT32_ENABLE_PERSISTENCE` = 0 in `include/platforms/PlatformDefaults.h`; no symbols, no Engine bytes when off). Opt in with `-D PIXELROOT32_ENABLE_PERSISTENCE=1`. API and per-platform stores: `pixelroot32-persistence`. |
+| Save slots on microSD | off / on | ESP32 only, and only with persistence on. `PIXELROOT32_ENABLE_SD_STORAGE` defaults to `0`; opt in with `-D PIXELROOT32_ENABLE_SD_STORAGE=1` on each ESP32 env that needs it. The build fails with a named `#error` without `PIXELROOT32_ENABLE_PERSISTENCE=1` or off ESP32. API: `SdSlotStore`/`SdConfig` in `pixelroot32-persistence`. |
 
 ## ESP32 Constraints
 
@@ -312,7 +313,7 @@ void MyGameScene::draw(pr32::graphics::Renderer& renderer) {
 7. **Native entry is `main()`; ESP32 entry is `setup()`/`loop()`.** `engine.setScene(&scene)` before `engine.run()`. `Engine` does not own the scene — keep the scene alive for the whole run.
 8. **`Scene::init()` is idempotent and must be called first** in every override (it runs `resetState()`). Release owned resources in a `resetState()` override BEFORE calling `Scene::resetState()`.
 9. **Native SDL teardown is order-independent (engine 1.14.0, issue #273).** `SDL2_Drawer` owns only `SDL_INIT_VIDEO` and `SDL2_AudioBackend` only `SDL_INIT_AUDIO`; neither calls `SDL_Quit()`. Keep the documented pattern (audio backend declared before the `Engine`), but do NOT add an `SDL_Quit()` call or reorder globals to work around shutdown crashes — the process exit reclaims SDL, and any SDL subsystem the game initialises itself (game controller, joystick) is left alone by the engine.
-10. **Windows SDL2**: `native` needs the MSYS2/MinGW include/lib paths (`-IC:/msys64/mingw64/include -LC:/msys64/mingw64/lib`); macOS uses Homebrew paths instead. Keep both, one commented, per the examples.
+10. **SDL2 host paths**: a standalone project (the scaffold output) must supply its own include/library paths — MSYS2/MinGW (`-IC:/msys64/mingw64/include -LC:/msys64/mingw64/lib`) on Windows, Homebrew (`-I/opt/homebrew/include -L/opt/homebrew/lib`) on macOS. The engine's own examples no longer carry per-OS flags: `scripts/platformio_native_sdl2.py` detects the host prefix at build time. Copy that script into the project and add `extra_scripts = pre:scripts/platformio_native_sdl2.py` instead of hand-editing flags when the project can host it.
 
 ## Common Patterns
 
