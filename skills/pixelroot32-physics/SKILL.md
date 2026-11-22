@@ -8,7 +8,7 @@ metadata:
   subsystem: physics
   module: collision
   feature_gate: PIXELROOT32_ENABLE_PHYSICS
-  engine_version: "1.15.0"
+  engine_version: "1.16.0"
   platform: cross-platform
 ---
 
@@ -148,7 +148,9 @@ Circle c = { toScalar(50), toScalar(50), toScalar(10) };
 
 // Segment collider (ramps, cushions): a StaticActor with SEGMENT shape.
 // Endpoints are relative to position. Canonical example: RampActor in
-// examples/physics/src/PhysicsDemoScene.h.
+// examples/physics/src/PhysicsDemoScene.h. For all three actor types together in a
+// game-shaped scene, read examples/platformer: KinematicActor character, RigidActor crates,
+// StaticActor level, setOneWay(true) platforms, collision layers/masks in GameLayers.h.
 ramp.setShape(CollisionShape::SEGMENT);
 ramp.setSegment(a, b);   // Vector2 endpoints, position-relative
 

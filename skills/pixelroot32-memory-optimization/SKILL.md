@@ -7,7 +7,7 @@ metadata:
   domain: engine
   language: cpp
   platform: esp32
-  engine_version: "1.14.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview
@@ -57,7 +57,10 @@ way round (`measure_networking` / `measure_persistence` minus `measure_full`), o
 These rows exclude the platform backends on purpose. **`ESP32EspNowTransport` alone pulls the
 whole Wi-Fi/lwIP stack (~580 KB flash)** — budget that separately for any real ESP-NOW game.
 Persistence static RAM on the ESP32 (CHANGELOG 1.14.0): 16 B for `PersistenceService`, 24 B per
-NVS key-value store. Networking RAM scales with the `PIXELROOT32_NET_*` capacities (peer table
+NVS key-value store, and `SdSlotStore` adds only two pointers plus the limits — no heap. The
+cost of the microSD path is the FATFS driver the Arduino `SD` library links (several KB of
+RAM), budgeted separately, exactly like the Wi-Fi stack for ESP-NOW. See
+`pixelroot32-persistence`. Networking RAM scales with the `PIXELROOT32_NET_*` capacities (peer table
 `PIXELROOT32_NET_MAX_PEERS` default 4, payload `PIXELROOT32_NET_MAX_PAYLOAD` default 64, RX/TX
 queues default 8 each) — see `pixelroot32-networking`.
 

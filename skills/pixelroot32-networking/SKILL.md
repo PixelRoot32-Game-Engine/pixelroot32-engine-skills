@@ -9,7 +9,7 @@ metadata:
   module: networking
   feature_gate: PIXELROOT32_ENABLE_NETWORKING
   platform: cross-platform
-  engine_version: "1.14.0"
+  engine_version: "1.16.0"
 ---
 
 ## Overview
@@ -29,9 +29,11 @@ every layer is borrowed, never owned, by the one above it:
 **One flag gates everything**: `PIXELROOT32_ENABLE_NETWORKING`, default `0`. Off, the module
 contributes no symbols, no `Engine` bytes and no `Scene` vtable slot. On, it is **only
 supported on ESP32 and native** — any other target hits a named `#error`. ESP-NOW and `WiFi`
-come from the Arduino-ESP32 core: no `lib_deps`. Reference projects: `examples/esp_now`
-(shared counter), `examples/esp_now_dice` (commit/reveal), `examples/esp_now_ping` (tagged
-custom messages, application RTT).
+come from the Arduino-ESP32 core: no `lib_deps`. Reference projects in this repository:
+`examples/esp_now` (shared counter) and `examples/esp_now_ping` (tagged custom messages,
+application RTT). The commit/reveal dice duel is a finished game and now lives in
+`PixelRoot32-Demo-Projects/networking/esp_now_dice`; its `DiceDuel`/`DiceProtocol` headers
+are example-owned, not engine API.
 
 **Scope: convergence, not lockstep.** The same applied operations give the same value on
 every peer whatever the arrival order; two screens may differ for a few frames while an
@@ -340,7 +342,8 @@ label) for game roles and score signs. Pumping a session by hand keeps the order
 
 **Gameplay** (see **`pixelroot32-gameplay-framework`**): a networked turn or round is a
 small state machine whose transitions are driven from `onNetworkEvent` and a timeout, as in
-`examples/esp_now_dice` (`Committing`/`Revealing` expire after 3 s).
+the `esp_now_dice` demo (`PixelRoot32-Demo-Projects/networking/esp_now_dice`;
+`Committing`/`Revealing` expire after 3 s).
 
 **Testing on native** (see **`pixelroot32-testing`**): two sessions on one `LoopbackBus`,
 faults injected, clock advanced explicitly. Run with `pio test -e native_test_networking`
@@ -418,13 +421,13 @@ and logic, not RF range, interference or Wi-Fi timing.
 ## Common Patterns
 
 ```cpp
-// Shared score with a sign convention (examples/esp_now_dice): value() holds A - B
+// Shared score with a sign convention (esp_now_dice demo): value() holds A - B
 const bool isA = session.localNodeId() < otherNodeId;
 counter.add(isA ? +1 : -1);            // winner moves the shared score once per round
 if (counter.revision() != lastRevision) { lastRevision = counter.revision(); redraw(); }
 if (counter.isOutOfSync()) { /* surface "desync" — value may have diverged */ }
 
-// Commit/reveal round (examples/esp_now_dice): no peer can pick after seeing the other
+// Commit/reveal round (esp_now_dice demo): no peer can pick after seeing the other
 // 1. send Reliable Commit{round, commitment(seed)}  2. after both commits, send Reveal{round, seed}
 // 3. verify reveal against commitment (mismatch -> CHEAT), derive the result from
 //    (seedA, seedB, round) on both boards — never transmit the result itself
